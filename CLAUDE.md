@@ -21,8 +21,8 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 ## Layout
 
 ```
-charck.py              the entire tool, one module, ~1310 lines, stdlib only
-tests/test_charck.py   standalone regression suite, ~770 lines, 152 cases (146 without make)
+charck.py              the entire tool, one module, ~1685 lines, stdlib only
+tests/test_charck.py   standalone regression suite, ~1025 lines, 196 cases (190 without make)
 pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
 Makefile               help (default), test, install, uninstall, clean; GNU make 3.81 compatible
 README.md              user-facing docs, written in the author's voice (see Voice below)
@@ -38,10 +38,10 @@ Section comments (`# ---- name ----`) mark the boundaries. In file order:
 | Config discovery | `xdg_config_home`, `global_config`, `find_local_config`, `resolve_layers`, `merge_layers` | Locate and layer the two ledgers |
 | Module constants | `LOCAL_NAME`, `SELF_FILES`, `ACTIONS`, `KEY_RE`, `TABLE_RE`, `CONTEXT`, `HEADER` | |
 | Classification | `is_exempt`, `key_of`, `name_of`, `suggest` | What is reported, and what the ledger suggests |
-| Config | `ConfigError`, `load_config`, `load_patterns`, `toml_string`, `render_entry`, `append_entries` | Read, validate and append to a ledger |
+| Config | `ConfigError`, `load_config`, `load_patterns`, `toml_string`, `render_entry`, `array_end`, `splice`, `ignore_insert`, `open_ledger`, `read_ledger`, `append_patterns`, `append_entries` | Read, validate, append to and record a pattern in a ledger |
 | Scanning | `read_source`, `iter_lines`, `line_body`, `scan_text`, `safe_context`, `render` | Find findings and display them |
 | Rewriting | `build_pattern`, `apply_decisions`, `write_atomic` | Apply decisions and write files |
-| Ignoring | `DEFAULT_IGNORE`, `ALWAYS_PRUNE`, `POSIX_CLASS`, `class_regex`, `pattern_regex`, `make_rule`, `rule_group`, `ignored_by`, `read_ignore_file`, `inside_git`, `git_root`, `git_groups` | gitignore-syntax patterns, and where they come from |
+| Ignoring | `DEFAULT_IGNORE`, `ALWAYS_PRUNE`, `POSIX_CLASS`, `class_regex`, `pattern_regex`, `make_rule`, `rule_group`, `record_form`, `ignored_by`, `read_ignore_file`, `inside_git`, `git_root`, `git_groups` | gitignore-syntax patterns, and where they come from |
 | Walking | `walk_tree`, `collect` | Expand paths into targets |
 | CLI | `describe`, `build_parser`, `main`, `cli` | Argument handling, report, exit codes |
 
@@ -72,6 +72,20 @@ even if the test suite still passes, so add a test if you find a gap.
 - **Appends are append-only.** `append_entries` never rewrites existing bytes, so
   hand edits, comments and ordering survive. It holds an `flock` and re-reads
   under it.
+- **`append_patterns` is the one exception, and it goes through `write_atomic`.** A
+  pattern has to go inside the `[files] ignore` array, which no append can do, and
+  a rewrite in place would put every decision after the insertion point at the
+  mercy of a short write. So it builds the new text, re-parses it and compares the
+  whole document against the one it came from, then writes it the way every other
+  file here is written: temporary file, `fsync`, rename. A ledger it cannot read
+  with certainty, `files.ignore` as a dotted key or an inline table, is left alone
+  and the pattern is printed instead. Recording is exit `1` when it is declined,
+  never a silent `0`.
+- **A `--exclude` means the same thing after it is written down.** It anchors to
+  the working directory, and `record_form` rewrites an anchored one for the
+  directory of the ledger it lands in. Where that rewrite is impossible, or where a
+  walk root is not under the ledger the pattern would go in, the run is exit `2`,
+  never a pattern that means somewhere else, or nothing at all, on the next run.
 - **Writes are atomic and follow symlinks.** `tempfile.mkstemp` (not a predictable
   name), `os.fsync`, `os.chmod` from the original, then `os.replace` onto the
   realpath.

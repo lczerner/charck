@@ -111,10 +111,10 @@ directories, a leading or embedded `/` anchors the pattern to the directory of
 the file it is written in, `*` stops at a `/` and `**` does not, and a leading
 `!` puts something back. Of two patterns that both match, the later one decides.
 
-Four sources are read, in this order:
+Five sources are read, in this order:
 
 ```
-built-in defaults  ->  .gitignore  ->  global ledger  ->  local ledger
+built-in defaults -> .gitignore -> global ledger -> local ledger -> --exclude
 ```
 
 The built-in defaults are dot-files and dot-directories, `node_modules`,
@@ -127,6 +127,45 @@ deeper file winning over the shallower one. Outside a work tree nothing is read,
 since git would apply nothing there either. `--no-gitignore` turns that off,
 `--no-ignore` turns off every pattern including the defaults, and `-v` prints
 each ignored path with the pattern that caught it and the file it came from.
+
+### Excluding from the command line
+
+The first run over a tree is the one with no ledger to record anything in, which
+is a poor moment to find out that `build/` holds four hundred generated files.
+`--exclude` takes one pattern, in the same syntax, and repeats:
+
+```sh
+charck --exclude build/ --exclude '*.min.js' --exclude 'content/vendor/**' .
+```
+
+It outranks everything recorded, `!` patterns included, and it is written to the
+ledger as the run goes, so the next run needs no flag. A pattern the ledger
+already lists is not added twice, and `--no-append` applies it to this run only.
+
+A pattern anchors to the directory you are standing in rather than to the tree
+you are scanning, so `--exclude /build/` run from `content/` means
+`content/build` wherever the walk goes. The ledger it gets recorded in may be
+somewhere else, and an anchored pattern is rewritten on the way in so that it
+goes on meaning the same place: from `/proj/sub`, with the ledger at `/proj`,
+`/build/` is recorded as `/sub/build/`. The run prints that when it happens. A
+pattern without a slash matches at any depth and is recorded exactly as typed.
+
+Two things it will not do. A ledger whose `ignore` array cannot be located for
+certain, which is `files.ignore` written as a dotted key or as an inline table,
+is left alone: the pattern still applies to the run, it is printed for you to
+paste in, and the run exits `1` so that nothing reads as clean when it is not.
+And a pattern that could not go on meaning the same thing is refused with exit
+`2` before the walk rather than applied and then quietly reinterpreted. That
+covers an anchored pattern when the ledger is not above the directory you are
+standing in, and any pattern at all when the tree you are scanning is not under
+the ledger either, since a recorded pattern only ever applies below its own
+file. `--no-append` is the way through both.
+
+The array is the one part of a ledger `charck` edits rather than appends to. It
+re-reads the file under a lock, builds the new text, parses it and compares the
+whole document against the one it started from, and only then writes it out to a
+temporary file and renames it over the original. A write that fails halfway
+leaves your decisions where they were.
 
 Matching is case-sensitive, even where the filesystem is not. On macOS `build/`
 does not ignore a directory named `Build`, though git, which sets
@@ -188,6 +227,7 @@ not covered by a run over its parent. Name it and it is walked.
 --list             print the merged ledger as a decision table
 --config PATH      use only this ledger, ignoring both layers
 --ext .md,.toml    restrict a directory walk by extension
+--exclude build/   leave this out of a walk, and record it in the ledger
 --no-ignore        apply no ignore patterns at all, defaults included
 --no-gitignore     do not read .gitignore, but keep the ledger's patterns
 -v / -q            show what was ignored or skipped / summary only
@@ -273,10 +313,10 @@ not be worth much anyway.
 python3 tests/test_charck.py
 ```
 
-152 cases covering the reporting contract, the ledger layering, the ignore rules
+196 cases covering the reporting contract, the ledger layering, the ignore rules
 and the failure modes above. It exits non-zero if anything fails. Six of those
 cases check the `Makefile` and skip themselves on a checkout that has no `make`,
-so you will see 146 there. Two more skip themselves when `TMPDIR` is inside a git
+so you will see 190 there. Two more skip themselves when `TMPDIR` is inside a git
 repository, since that repository would then have a say in the result.
 
 ## Disclaimer

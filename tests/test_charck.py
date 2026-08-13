@@ -766,6 +766,260 @@ try:
 finally:
     os.chmod(Y / ".gitignore", 0o644)
 
+print("\n== Z. --exclude: what a first run leaves out, and what it writes down ==")
+# The flag exists for the run before there is a ledger to record anything in,
+# so this section uses ledger discovery rather than --config: an empty
+# XDG_CONFIG_HOME, so no global ledger is in play, and a tree with none above
+# it. --no-gitignore throughout, as a .gitignore above TMPDIR would otherwise
+# decide part of the outcome.
+zhome = ROOT / "zhome"; zhome.mkdir()
+zenv = dict(os.environ, XDG_CONFIG_HOME=str(zhome))
+Z = ROOT / "excl"
+for name in ("build", "sub/deep", "keep", "vendor", ".github"):
+    (Z / name).mkdir(parents=True)
+for name in ("x.md", "build/b.md", "sub/s.md", "sub/deep/d.md", "keep/k.md",
+             "vendor/v.md", ".github/wf.md"):
+    (Z / name).write_text(DASH, encoding="utf-8")
+zledger = Z / ".charck.toml"
+other = ROOT / "other"; other.mkdir()
+
+def zrun(cwd, *a):
+    return subprocess.run([sys.executable, TOOL, "--no-gitignore", *a],
+                          capture_output=True, text=True, cwd=str(cwd), env=zenv)
+
+r = zrun(Z, "--exclude", "build/", ".")
+check("a first run excludes with no ledger to say so",
+      "b.md" not in r.stdout and "x.md" in r.stdout, r.stdout[:400])
+led = zledger.read_text(encoding="utf-8")
+check("...and the pattern lands in the ledger that run created",
+      "[files]" in led and '"build/"' in led, led[-200:])
+check("...and recording it is announced, not silent",
+      "recorded 1 ignore pattern" in r.stdout, r.stdout[-300:])
+r = zrun(Z, ".")
+check("the next run needs no flag", "b.md" not in r.stdout and "x.md" in r.stdout,
+      r.stdout[:400])
+
+before = zledger.read_bytes()
+r = zrun(Z, "--exclude", "keep/", ".")
+after = zledger.read_text(encoding="utf-8")
+check("a second pattern goes into the array that is already there",
+      after.count("\nignore = [") == 1 and '"keep/"' in after, after[-200:])
+# The one place a ledger is edited rather than grown, so this asserts on the
+# bytes: everything but the inserted line has to be exactly what it was.
+check("...and not a byte of the rest of the ledger moves",
+      after.replace('  "keep/",\n', "", 1).encode("utf-8") == before,
+      repr(after[-200:]))
+check("...and it takes effect on the run that recorded it",
+      "k.md" not in r.stdout, r.stdout[:400])
+r = zrun(Z, "--exclude", "keep/", ".")
+check("a pattern already in the ledger is not recorded twice",
+      zledger.read_text(encoding="utf-8").count('"keep/"') == 1
+      and "recorded" not in r.stdout, r.stdout[-200:])
+
+# Anchoring is relative to the file a pattern lives in, and the ledger is not
+# always the directory you are standing in. Both meanings have to survive.
+r = zrun(Z / "sub", "--exclude", "/deep/", ".")
+led = zledger.read_text(encoding="utf-8")
+check("an anchored --exclude excludes relative to the working directory",
+      "d.md" not in r.stdout and "s.md" in r.stdout, r.stdout[:400])
+check("...and is recorded relative to the ledger instead",
+      '"/sub/deep/"' in led and '"/deep/"' not in led, led[-200:])
+check("...visibly, not behind your back",
+      'recorded as "/sub/deep/"' in r.stdout, r.stdout[-300:])
+r = zrun(Z, ".")
+check("the recorded form means the same place from the ledger's own directory",
+      "d.md" not in r.stdout and "s.md" in r.stdout, r.stdout[:400])
+
+# Shapes a hand-edited array comes in. A comment belongs to the entry its
+# author wrote it after, so the new entry goes below it, not between the two.
+zc = cfg("shape.toml", '[files]\nignore = [\n  "vendor/",   # PDF pastes\n]\n')
+zrun(Z, "--config", zc, "--exclude", "keep/", "-q", ".")
+got = Path(zc).read_text(encoding="utf-8")
+# The undecided U+2014 is appended to the same ledger by the same run, so the
+# assertion is on the array and what surrounds it, not on the whole file.
+check("a comment stays with the entry it was written after",
+      got.startswith('[files]\nignore = [\n  "vendor/",   # PDF pastes\n'
+                     '  "keep/",\n]\n'), repr(got[:120]))
+zs = cfg("oneline.toml", '[files]\nignore = ["vendor/"]\n')
+zrun(Z, "--config", zs, "--exclude", "keep/", "-q", ".")
+got = Path(zs).read_text(encoding="utf-8")
+check("a single-line array stays on one line",
+      got.startswith('[files]\nignore = ["vendor/", "keep/"]\n'), repr(got[:120]))
+
+# files.ignore as a dotted key is valid TOML this cannot locate for certain.
+# Guessing at someone's ledger is not on, so it is left alone and said so.
+zd = cfg("dotted.toml", 'files.ignore = ["vendor/"]\n')
+r = zrun(Z, "--config", zd, "--exclude", "keep/", "-q", ".")
+got = Path(zd).read_text(encoding="utf-8")
+check("a ledger whose ignore array cannot be found is left alone",
+      got.startswith('files.ignore = ["vendor/"]\n') and "keep/" not in got,
+      repr(got[:120]))
+check("...and the pattern to add by hand is printed",
+      "could not record" in r.stdout and '"keep/"' in r.stdout, r.stdout[-300:])
+
+zn = cfg("noapp.toml", '[files]\nignore = []\n')
+before = Path(zn).read_bytes()
+r = zrun(Z, "--config", zn, "--no-append", "--exclude", "keep/", ".")
+check("--no-append applies the pattern to this run",
+      "k.md" not in r.stdout and "v.md" in r.stdout, r.stdout[:400])
+check("...and records nothing", Path(zn).read_bytes() == before)
+# --no-ignore turns off what was recorded; a pattern given on the same command
+# line is what is being asked for right now.
+r = zrun(Z, "--config", zn, "--no-append", "--no-ignore", "--exclude", "keep/", ".")
+check("--exclude survives --no-ignore",
+      "k.md" not in r.stdout and "v.md" in r.stdout, r.stdout[:400])
+r = zrun(Z, "--config", zn, "--no-append", "--exclude", "keep/", "keep/k.md")
+check("a path named directly is scanned though --exclude names it",
+      "k.md" in r.stdout, r.stdout[:400])
+
+zg = cfg("bang.toml", '[files]\nignore = ["!.github/"]\n')
+r = zrun(Z, "--config", zg, "--no-append", ".")
+check("a recorded ! brings a built-in default back", "wf.md" in r.stdout,
+      r.stdout[:400])
+r = zrun(Z, "--config", zg, "--no-append", "--exclude", ".github/", ".")
+check("--exclude outranks a recorded re-include", "wf.md" not in r.stdout,
+      r.stdout[:400])
+
+# Ours, so exit 2, exactly as an unusable pattern in a ledger is.
+before = Path(zn).read_bytes()
+r = zrun(Z, "--config", zn, "--exclude", "a//b", "-q", ".")
+check("an unusable --exclude is exit 2 and stops the run",
+      r.returncode == 2 and "--exclude" in r.stderr and "empty path segment"
+      in r.stderr, r.stderr[:200])
+check("...with the ledger untouched", Path(zn).read_bytes() == before)
+
+# An anchored pattern that could not be written down without changing meaning
+# is refused before the walk, not applied and then quietly dropped.
+zf = other / "f.toml"; zf.write_text("", encoding="utf-8")
+r = zrun(Z, "--config", str(zf), "--exclude", "sub/deep/", "-q", ".")
+check("an anchored --exclude the ledger cannot hold stops the run",
+      r.returncode == 2 and "anchored" in r.stderr, r.stderr[:300])
+r = zrun(Z, "--config", str(zf), "--no-append", "--exclude", "sub/deep/", ".")
+check("...and --no-append is the way through",
+      r.returncode == 1 and "d.md" not in r.stdout, r.stdout[:400])
+
+# The rules match at any depth, unlike a ledger's, whose group only applies
+# under its own directory. A prefix here would make this silently scan keep/.
+r = zrun(other, "--config", zn, "--no-append", "--exclude", "keep/", str(Z))
+check("an unanchored --exclude reaches a tree outside the working directory",
+      "k.md" not in r.stdout and "v.md" in r.stdout, r.stdout[:400])
+
+r = zrun(Z, "--config", zn, "--no-append", "-v", "--exclude", "keep/", ".")
+check("-v names --exclude as the source of the rule",
+      "[keep/ from --exclude]" in r.stdout,
+      [l for l in r.stdout.splitlines() if "ignored" in l])
+r = zrun(Z, "--config", zn, "--list", "--exclude", "keep/")
+check("--list shows a command-line pattern as cli",
+      any(l.startswith("cli") and "keep/" in l for l in r.stdout.splitlines()),
+      r.stdout[-300:])
+
+# A ledger's patterns only apply under its own directory, so a pattern recorded
+# for a tree somewhere else would work on this run and do nothing on the next.
+r = zrun(Z, "--exclude", "keep/", str(other))
+check("a walk root the ledger is not above stops the run",
+      r.returncode == 2 and "could never apply" in r.stderr, r.stderr[:200])
+
+# Declining to write is not an operational failure, but it does leave something
+# to act on, so a build gate must not read it as a clean pass.
+(Z / "clean.md").write_text("plain ascii\n", encoding="utf-8")
+r = zrun(Z, "--config", zd, "--exclude", "build/", "-q", "clean.md")
+check("a pattern that could not be recorded is exit 1 on an otherwise clean run",
+      r.returncode == 1 and "could not record" in r.stdout,
+      "exit=%d %s" % (r.returncode, r.stdout[-200:]))
+
+# The two rewrites `record_form` performs. Neither shows up in a report, and
+# both produce a pattern that means something else when they are missed.
+zm = ROOT / "meta"
+for name in ("a*b/build", "aXb/build"):
+    (zm / name).mkdir(parents=True)
+for name in ("a*b/x.md", "a*b/build/b.md", "aXb/build/c.md"):
+    (zm / name).write_text(DASH, encoding="utf-8")
+(zm / ".charck.toml").write_text('[files]\nignore = []\n', encoding="utf-8")
+zrun(zm / "a*b", "-q", "--exclude", "/build/", ".")
+led = (zm / ".charck.toml").read_text(encoding="utf-8")
+check("a glob character in the path is escaped on the way into the ledger",
+      '"/a\\\\*b/build/"' in led, led[:200])
+r = zrun(zm, "-v", ".")
+hits = [l for l in r.stdout.splitlines() if l.startswith("  ignored")]
+check("...so the recorded pattern still names the one directory it meant",
+      any("a*b/build" in l for l in hits)
+      and not any("aXb/build" in l for l in hits), hits)
+
+zb = ROOT / "bang"; (zb / "sub" / "deep").mkdir(parents=True)
+for name in ("sub/x.md", "sub/deep/d.md"):
+    (zb / name).write_text(DASH, encoding="utf-8")
+(zb / ".charck.toml").write_text('[files]\nignore = ["deep/"]\n', encoding="utf-8")
+r = zrun(zb / "sub", "--exclude", "!/deep/", ".")
+led = (zb / ".charck.toml").read_text(encoding="utf-8")
+check("a leading ! survives the rewrite rather than being buried inside it",
+      '"!/sub/deep/"' in led, led[:200])
+check("...and the re-include works on the run that recorded it",
+      "d.md" in r.stdout, r.stdout[:400])
+r = zrun(zb, ".")
+check("...and again from the ledger's own directory", "d.md" in r.stdout,
+      r.stdout[:400])
+
+# The ledger anchors to the directory holding the file, symlink or not, so the
+# rewrite has to use that directory and not the one the link points into.
+zl = ROOT / "linked"; (zl / "proj" / "sub").mkdir(parents=True)
+(zl / "shared").mkdir()
+(zl / "proj" / "sub" / "x.md").write_text(DASH, encoding="utf-8")
+(zl / "shared" / "led.toml").write_text('[files]\nignore = []\n', encoding="utf-8")
+os.symlink("../shared/led.toml", zl / "proj" / ".charck.toml")
+r = zrun(zl / "proj" / "sub", "-q", "--exclude", "/build/", "--exclude",
+         "/build/", ".")
+check("a symlinked ledger anchors the recorded pattern to the link's directory",
+      '"/sub/build/"' in (zl / "shared" / "led.toml").read_text(encoding="utf-8"),
+      (zl / "shared" / "led.toml").read_text(encoding="utf-8")[:200])
+check("...and the same pattern twice is reported once",
+      r.stdout.count("recorded as") == 1, r.stdout[-300:])
+
+# Shapes that used to be recorded wrongly, or not at all.
+zt = cfg("nocomma.toml", '[files]\nignore = [\n  "vendor/"   # third-party\n]\n')
+zrun(Z, "--config", zt, "--exclude", "keep/", "-q", ".")
+got = Path(zt).read_text(encoding="utf-8")
+check("a comment on an entry with no comma keeps the entry it describes",
+      got.startswith('[files]\nignore = [\n  "vendor/",   # third-party\n'
+                     '  "keep/",\n]\n'), repr(got[:120]))
+zz = cfg("zeroindent.toml", '[files]\nignore = [\n"a/",\n]\n')
+zrun(Z, "--config", zz, "--exclude", "keep/", "-q", ".")
+got = Path(zz).read_text(encoding="utf-8")
+check("an array written at column zero stays at column zero",
+      got.startswith('[files]\nignore = [\n"a/",\n"keep/",\n]\n'), repr(got[:120]))
+zr = cfg("crlf.toml", "")
+Path(zr).write_bytes(b'[files]\r\nignore = [\r\n  "vendor/",\r\n]\r\n')
+zrun(Z, "--config", zr, "--exclude", "keep/", "-q", ".")
+check("a CRLF ledger can record a pattern too",
+      b'"keep/"' in Path(zr).read_bytes(), Path(zr).read_bytes()[:120])
+
+# The insert is the one edit this makes to a ledger, so a write that cannot
+# happen has to leave every decision in it exactly where it was.
+zw = ROOT / "nowrite"; zw.mkdir()
+(zw / "x.md").write_text(DASH, encoding="utf-8")
+zwl = zw / "led.toml"
+zwl.write_text('[files]\nignore = ["v/"]\n[chars."U+2014"]\naction = "delete"\n',
+               encoding="utf-8")
+before = zwl.read_bytes()
+os.chmod(zw, 0o555)
+try:
+    r = zrun(ROOT, "--config", str(zwl), "--exclude", "build/", "-q",
+             str(zw / "x.md"))
+    check("a ledger that cannot be written is left exactly as it was",
+          zwl.read_bytes() == before, zwl.read_text(encoding="utf-8")[:200])
+    check("...and that is exit 2 with a message, not a traceback",
+          r.returncode == 2 and "Traceback" not in r.stderr, r.stderr[-200:])
+finally:
+    os.chmod(zw, 0o755)
+
+# This tool of all tools does not get to pretend a path segment cannot hold a
+# newline. `.` in the any-depth prefix does not match one; `(?s:.)` does.
+znl = ROOT / "od\nnl"; (znl / "build").mkdir(parents=True)
+for name in ("s.md", "build/b.md"):
+    (znl / name).write_text(DASH, encoding="utf-8")
+r = zrun(znl, "--config", zn, "--no-append", "--exclude", "build/", ".")
+check("a newline in a directory name does not defeat an unanchored pattern",
+      "b.md" not in r.stdout and "s.md" in r.stdout, r.stdout[:400])
+
 print("\n%d passed, %d failed" % (passed, failed))
 shutil.rmtree(ROOT, ignore_errors=True)
 sys.exit(1 if failed else 0)
