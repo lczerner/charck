@@ -1,0 +1,49 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "charck"
+version = "1.0.0"
+description = "Check text files for non-ASCII characters, and repair them"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [{ name = "Lukáš Czerner", email = "lukas@czerner.cz" }]
+keywords = [
+    "unicode",
+    "utf-8",
+    "ascii",
+    "zero-width",
+    "invisible-characters",
+    "homoglyph",
+    "linter",
+    "text",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Operating System :: POSIX",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Text Processing",
+    "Topic :: Text Processing :: Linguistic",
+    "Topic :: Utilities",
+]
+
+# No dependencies, by design. tomllib is stdlib from 3.11, which is what sets
+# requires-python above.
+dependencies = []
+
+[project.scripts]
+charck = "charck:cli"
+
+[project.urls]
+Homepage = "https://github.com/lczerner/charck"
+Issues = "https://github.com/lczerner/charck/issues"
+
+[tool.setuptools]
+# Single-module project: charck.py at the repo root, no package directory.
+py-modules = ["charck"]
