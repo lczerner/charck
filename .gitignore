@@ -1,0 +1,33 @@
+# Local decision ledger. Records editorial choices about this repo's own files,
+# so it is local state, not source. Running charck here creates one; keeping it
+# untracked stops that from dirtying the tree. Projects that want to share their
+# decisions across a team should remove this line and commit the file instead.
+.charck.toml
+
+# Temp files from an interrupted --fix. write_atomic normally cleans these up,
+# but a SIGKILL mid-write can leave one behind.
+.*.charck-tmp
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.DS_Store
+*.swp
+*~
+.idea/
+.vscode/
