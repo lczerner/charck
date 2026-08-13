@@ -273,10 +273,10 @@ not be worth much anyway.
 python3 tests/test_charck.py
 ```
 
-150 cases covering the reporting contract, the ledger layering, the ignore rules
+152 cases covering the reporting contract, the ledger layering, the ignore rules
 and the failure modes above. It exits non-zero if anything fails. Six of those
 cases check the `Makefile` and skip themselves on a checkout that has no `make`,
-so you will see 144 there. Two more skip themselves when `TMPDIR` is inside a git
+so you will see 146 there. Two more skip themselves when `TMPDIR` is inside a git
 repository, since that repository would then have a say in the result.
 
 ## Disclaimer

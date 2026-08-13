@@ -735,7 +735,10 @@ def pattern_regex(text):
             segment = (i == 0 or text[i - 1] == "/") and (j == n or text[j] == "/")
             if j - i >= 2 and segment:
                 if j == n:
-                    out.append(".*")           # trailing **: everything below
+                    # Trailing **: everything below. (?s:), since a newline is a
+                    # legal character in a path segment and this tool of all
+                    # tools does not get to pretend otherwise.
+                    out.append("(?s:.*)")
                 else:
                     out.append("(?:[^/]+/)*")
                     j += 1
@@ -820,7 +823,7 @@ def make_rule(pattern, base, where, label):
                           % (where, toml_string(pattern), fault))
 
     try:
-        compiled = re.compile(("" if anchored else "(?:.*/)?")
+        compiled = re.compile(("" if anchored else "(?s:.*/)?")
                               + pattern_regex(text))
     except (re.error, ValueError) as exc:
         raise ConfigError("%s: ignore pattern %s is not usable (%s)"

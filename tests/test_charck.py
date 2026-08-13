@@ -697,6 +697,18 @@ out = cornered("[!w].md").stdout
 check("a negated class does not match a separator either",
       "w.md" in out and "a.md" not in out, out[:400])
 
+# A newline is a legal character in a path segment, and `.` does not match one.
+# The tool that hunts invisible characters does not get to be defeated by one in
+# a directory name.
+nl = X / "d1" / "od\nnl"; nl.mkdir()
+(nl / "b.md").write_text(DASH, encoding="utf-8")
+out = cornered("b.md").stdout
+check("an unanchored pattern matches under a directory named with a newline",
+      "od\nnl/b.md" not in out and "long.md" in out, out[:400])
+out = cornered("d1/**").stdout
+check("a trailing ** reaches past one too", "od\nnl/b.md" not in out
+      and "d1/b.md" not in out and "a.md" in out, out[:400])
+
 # 11 stacked globstars took 23 seconds before they were collapsed at compile
 # time; the walk pays it per path.
 deep = X / "deep"
