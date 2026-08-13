@@ -1133,7 +1133,8 @@ def build_parser():
     ap.add_argument("--list", action="store_true",
                     help="print the config as a decision table and exit")
     ap.add_argument("-v", "--verbose", action="store_true",
-                    help="also show occurrences of ignored characters")
+                    help="also show occurrences of ignored characters, and "
+                         "every file skipped or ignored, with the reason")
     ap.add_argument("-q", "--quiet", action="store_true",
                     help="summary only, no per-occurrence detail")
     return ap
@@ -1292,10 +1293,13 @@ def main(argv=None):
                      describe(entry), flag))
         print()
 
-    for path, reason in skips:
-        print("  skipped %s: %s" % (path, reason))
-
     if args.verbose:
+        # Every "this file was not scanned" line lives here. A run over a
+        # content tree finds images and other binaries by the hundred, and one
+        # line each buries the findings the report exists for. The counts in
+        # the summary are what says they happened at all.
+        for path, reason in skips:
+            print("  skipped %s: %s" % (path, reason))
         # The "why is this file not being scanned" question, answered the way
         # `git check-ignore -v` answers it: with the pattern and its file.
         for path, rule in ignored:

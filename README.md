@@ -190,8 +190,13 @@ not covered by a run over its parent. Name it and it is walked.
 --ext .md,.toml    restrict a directory walk by extension
 --no-ignore        apply no ignore patterns at all, defaults included
 --no-gitignore     do not read .gitignore, but keep the ledger's patterns
--v / -q            show ignored characters and paths / summary only
+-v / -q            show what was ignored or skipped / summary only
 ```
+
+A file that cannot be read as UTF-8 text is skipped, and so is one an ignore
+pattern excludes. Both are counted in the last line of the report and neither is
+named unless you ask with `-v`, since a content tree with a few hundred images in
+it would otherwise bury the findings under a line per image.
 
 Exit code `0` means clean, `1` means there is something to look at or apply, and
 `2` means an operational error. The `1` is what makes the report usable as a build
@@ -268,10 +273,10 @@ not be worth much anyway.
 python3 tests/test_charck.py
 ```
 
-148 cases covering the reporting contract, the ledger layering, the ignore rules
+150 cases covering the reporting contract, the ledger layering, the ignore rules
 and the failure modes above. It exits non-zero if anything fails. Six of those
 cases check the `Makefile` and skip themselves on a checkout that has no `make`,
-so you will see 142 there. Two more skip themselves when `TMPDIR` is inside a git
+so you will see 144 there. Two more skip themselves when `TMPDIR` is inside a git
 repository, since that repository would then have a say in the result.
 
 ## Disclaimer

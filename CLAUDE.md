@@ -22,7 +22,7 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 
 ```
 charck.py              the entire tool, one module, ~1310 lines, stdlib only
-tests/test_charck.py   standalone regression suite, ~730 lines, 148 cases (142 without make)
+tests/test_charck.py   standalone regression suite, ~730 lines, 150 cases (144 without make)
 pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
 Makefile               help (default), test, install, uninstall, clean; GNU make 3.81 compatible
 README.md              user-facing docs, written in the author's voice (see Voice below)

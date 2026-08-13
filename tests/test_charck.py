@@ -118,8 +118,14 @@ check("target file was the one rewritten", real.read_text(encoding="utf-8") == "
 
 print("\n== H. review finding: binary detection scans the whole file ==")
 blob = src("blob.dat", b"A" * 9000 + b"\x00" + b"B" * 40)
-r = run("--config", cfg("b.toml", ""), "-q", str(blob))
+r = run("--config", cfg("b.toml", ""), "-q", "-v", str(blob))
 check("NUL past 8 KiB is still detected as binary", "binary (NUL byte)" in r.stdout, r.stdout[-160:])
+# One line per unreadable file buries the findings in a tree full of images,
+# so the reason is a -v question and the count carries it by default.
+r = run("--config", cfg("b.toml", ""), "-q", str(blob))
+check("a skipped file is not named without -v", "binary (NUL byte)" not in r.stdout,
+      r.stdout[-160:])
+check("...but the summary still counts it", "1 skipped" in r.stdout, r.stdout[-160:])
 
 print("\n== I. review finding: FIFOs and non-regular files ==")
 fifo_dir = ROOT / "fifo"; fifo_dir.mkdir()
