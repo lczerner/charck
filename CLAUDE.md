@@ -22,8 +22,9 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 
 ```
 charck.py              the entire tool, one module, ~880 lines, stdlib only
-tests/test_charck.py   standalone regression suite, ~350 lines, 71 cases
+tests/test_charck.py   standalone regression suite, ~420 lines, 77 cases (71 without make)
 pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
+Makefile               help (default), test, install, uninstall, clean; GNU make 3.81 compatible
 README.md              user-facing docs, written in the author's voice (see Voice below)
 .gitignore             ignores .charck.toml, .*.charck-tmp, and the usual Python noise
 ```
@@ -84,13 +85,21 @@ even if the test suite still passes, so add a test if you find a gap.
 ## Commands
 
 ```sh
-python3 tests/test_charck.py           # full suite, exits non-zero on failure
+make test                              # or: python3 tests/test_charck.py
+make help                              # the target list, and the default goal
 python3 -m py_compile charck.py        # syntax check
 python3 charck.py --no-append README.md   # dogfood: must report only U+FB01 and U+FF21
-python3 -m build --wheel               # packaging check (needs `build` in a venv)
+pipx run build --wheel                 # packaging check, without installing `build`
 ```
 
 There is no linter, formatter or CI configured. The test suite is the gate.
+
+`make install` goes through pipx, so the tool lands in its own virtualenv under
+`~/.local/pipx/venvs` with the command linked into `~/.local/bin`. Nothing is
+written outside `$HOME`, and `make uninstall` undoes it. Section `T` of the suite
+asserts that: no recipe may use `sudo` or a bare `pip install`. The Makefile
+targets `python3` and GNU make 3.81, which is what macOS ships, so no `.ONESHELL`
+and no `$(file ...)`.
 
 `tests/test_charck.py` is a plain script, not pytest. It defines `check(label,
 cond, extra)` and counts passes and failures. Sections are lettered (`A.`, `B.`,

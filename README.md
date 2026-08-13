@@ -154,14 +154,32 @@ step. Run without `--fix` first and read the report.
 
 Python 3.11 or newer, for `tomllib`. Standard library only, no dependencies.
 
+`make install` also needs `pipx`. Running `charck.py` straight out of the
+checkout does not.
+
 ## Install
 
 ```sh
-pip install .
+make install
 ```
 
+That goes through `pipx`, which builds the project into its own virtualenv under
+`~/.local/pipx/venvs/charck` and links the command into `~/.local/bin`. Nothing
+lands outside `$HOME`, and no recipe in the `Makefile` runs `sudo`. To undo it,
+`make uninstall`.
+
+You need `~/.local/bin` on your `PATH`. `pipx ensurepath` adds it.
+
+What pipx installs is a copy, so editing `charck.py` in the checkout does not
+change the installed command. Run `make install` again after a change. If you
+would rather have the checkout itself be what runs, `pipx install --editable .`
+does that, at the price of your scripts picking up whatever half-finished edit is
+in the tree.
+
 Or copy `charck.py` somewhere on your `PATH` and run it directly. It is a single
-file with no imports outside the standard library, so that works fine.
+file with no imports outside the standard library, so that works fine. You give
+up the version metadata and the uninstall record, which for a personal tool may
+not be worth much anyway.
 
 ## Tests
 
@@ -169,8 +187,10 @@ file with no imports outside the standard library, so that works fine.
 python3 tests/test_charck.py
 ```
 
-71 cases covering the reporting contract, the ledger layering, and the failure
-modes above. It exits non-zero if anything fails.
+77 cases covering the reporting contract, the ledger layering, and the failure
+modes above. It exits non-zero if anything fails. Six of those cases check the
+`Makefile` and skip themselves on a checkout that has no `make`, so you will see
+71 there.
 
 ## Disclaimer
 

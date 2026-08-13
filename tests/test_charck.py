@@ -349,6 +349,72 @@ check("no duplicate tables", body.count('[chars."U+2014"]') == 1,
       "count=%d" % body.count('[chars."U+2014"]'))
 check("no duplicate header", body.count("decision ledger") == 1)
 
+print("\n== T. the Makefile lists what it has, and installs nothing system-wide ==")
+# The only recipe really run here is `help`, which is echo and awk. The rest are
+# dry runs, which is safe for the recipes this Makefile has: `make -n` does still
+# execute a line prefixed with `+`, and there is none. Nothing in this section
+# installs, uninstalls or deletes anything, and none of it invokes `make test`,
+# which would recurse straight back into this file.
+REPO = Path(__file__).resolve().parent.parent
+MAKEFILE = REPO / "Makefile"
+if shutil.which("make") is None or not MAKEFILE.exists():
+    # Skip rather than fail: charck itself is one stdlib module, and a checkout
+    # without make (or the Makefile) is still a working checkout.
+    print("  SKIP  no make, or no Makefile")
+else:
+    def mk(*a):
+        # Drop the parent make's flags: run under `make test -j2` the sub-make
+        # would otherwise warn about the unavailable jobserver on stderr.
+        env = dict(os.environ)
+        for k in ("MAKEFLAGS", "MAKELEVEL", "MFLAGS"):
+            env.pop(k, None)
+        # DEVNULL and a timeout, because a make that leaves MAKEFILE_LIST unset
+        # hands awk no file to read and it would then sit on our stdin forever.
+        return subprocess.run(["make", *a], cwd=str(REPO), env=env,
+                              capture_output=True, text=True,
+                              stdin=subprocess.DEVNULL, timeout=120)
+
+    def target_of(line):
+        head = line.split(":", 1)[0]
+        if not line[:1].islower() or ":" not in line or head != head.strip():
+            return None
+        return head if "=" not in head and " " not in head else None
+
+    mkbody = MAKEFILE.read_text(encoding="utf-8")
+    phony = [t for line in mkbody.splitlines() if line.startswith(".PHONY:")
+             for t in line.split(":", 1)[1].split()]
+    # Read the rules themselves rather than trusting .PHONY. Deriving the list
+    # from .PHONY alone would leave a target that was never added to it checked
+    # by nothing at all, which is the mistake most likely to happen here.
+    targets = [t for t in map(target_of, mkbody.splitlines()) if t]
+    check("every rule is declared .PHONY", targets and set(targets) == set(phony),
+          "rules=%s phony=%s" % (sorted(targets), sorted(phony)))
+
+    bad = [t for t in targets if mk("-n", t).returncode != 0]
+    check("every target expands without error", not bad, bad)
+
+    r = mk("help")
+    # `-n` proves a recipe expands, never that it runs. help is the default goal
+    # and the one target worth proving actually works.
+    check("help itself runs", r.returncode == 0, r.stderr[-200:])
+
+    missing = [t for t in targets if ("  %s " % t) not in r.stdout]
+    # The failure this pins down: adding a target and forgetting its `##`
+    # comment leaves it working but invisible in `make help`.
+    check("help lists every target", not missing, missing)
+
+    bare = mk()
+    check("bare make prints the help",
+          bare.returncode == 0 and bare.stdout == r.stdout, bare.stderr[-200:])
+
+    # The point of installing through pipx is that it stays under $HOME. Recipe
+    # lines only: the header comment says "No sudo", and matching prose here
+    # would fail on the very sentence that promises the property.
+    recipes = "\n".join(l for l in mkbody.splitlines() if l.startswith("\t"))
+    check("no recipe escalates or installs system-wide",
+          "sudo" not in recipes and "pip install" not in recipes,
+          [l for l in recipes.splitlines() if "sudo" in l or "pip install" in l])
+
 print("\n%d passed, %d failed" % (passed, failed))
 shutil.rmtree(ROOT, ignore_errors=True)
 sys.exit(1 if failed else 0)
