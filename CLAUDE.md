@@ -180,5 +180,15 @@ Follow these steps in order for any non-trivial change. Do not skip ahead.
      the reason
    - any outstanding work, and any decision that has to be made on the human end
 
+### Committing
+
 Committing is a separate, explicit request. Do not commit or push unless asked.
 When asked, write the message to `../style/VOICE-COMMITS.md`.
+
+**Never add a file to the repository without permission.** The one exception is
+the obvious case: a file created in order to fulfil a request is part of that
+work and gets staged with it. Everything else in the working tree stays
+untracked, whatever `git status` happens to show. "Commit everything" means the
+work under discussion, not a sweep of every untracked path. Scratch files, notes
+and personal working copies are not yours to track. When a path is unclear, ask
+before committing rather than committing it and flagging it afterwards.
