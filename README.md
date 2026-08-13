@@ -91,6 +91,82 @@ scope. It says so when it creates one.
 `--config PATH` ignores both layers and reads and appends to exactly the file you
 name.
 
+## Ignoring files
+
+What a walk should leave alone goes in the same ledger, in gitignore syntax:
+
+```toml
+# .charck.toml
+[files]
+ignore = [
+  "build/",
+  "*.min.js",
+  "content/vendor/**",
+  "!content/vendor/notes.md",
+]
+```
+
+The syntax is gitignore's, and so are its rules. A trailing `/` matches only
+directories, a leading or embedded `/` anchors the pattern to the directory of
+the file it is written in, `*` stops at a `/` and `**` does not, and a leading
+`!` puts something back. Of two patterns that both match, the later one decides.
+
+Four sources are read, in this order:
+
+```
+built-in defaults  ->  .gitignore  ->  global ledger  ->  local ledger
+```
+
+The built-in defaults are dot-files and dot-directories, `node_modules`,
+`__pycache__`, `.venv`, `venv`, `target` and `dist`. They are ordinary patterns
+rather than a hardcoded rule, so `ignore = ["!.github/"]` brings that one back.
+
+`.gitignore` is read where git would read it: every file from the top of the work
+tree down to the directory being walked, plus `.git/info/exclude`, with the
+deeper file winning over the shallower one. Outside a work tree nothing is read,
+since git would apply nothing there either. `--no-gitignore` turns that off,
+`--no-ignore` turns off every pattern including the defaults, and `-v` prints
+each ignored path with the pattern that caught it and the file it came from.
+
+Matching is case-sensitive, even where the filesystem is not. On macOS `build/`
+does not ignore a directory named `Build`, though git, which sets
+`core.ignorecase` on such a volume, would ignore both.
+
+Now the limits, of which there are five.
+
+**An ignored directory is never descended into**, so `!build/keep.md` cannot
+reach a file under an ignored `build/`. That is gitignore's behaviour too, and it
+is what makes pruning cheap, because the contents are never listed at all.
+Negate the directory instead, or name the file on the command line.
+
+**A path named directly on the command line is never ignored.** `charck
+build/x.md` scans that file and `charck build/` walks that directory, whatever
+the patterns say. It is the same escape hatch that reaches a file `charck` would
+otherwise refuse to rewrite.
+
+**`.git` is never walked into**, whatever the patterns say and whatever
+`--no-ignore` says. A repository is full of text files that are not prose, and a
+`--fix` over `config`, `HEAD` or a loose ref would corrupt the repository
+itself. A walk cannot reach one by any spelling: not as a directory it meets,
+not as the directory you point at, and not through a symlink that leads back
+inside. Pointing `charck` at a `.git` is refused with exit `2` rather than
+quietly scanning nothing. Naming a single file inside one still works, because
+a path you name is a path you meant.
+
+**The global ledger takes only patterns without a slash.** Anchoring is relative
+to the directory of the file the pattern is written in, and `~/.config/charck/`
+is not your project. An anchored pattern there is a configuration error rather
+than a rule that quietly never matches, so put it in the project's
+`.charck.toml`.
+
+**Three things git does that `charck` does not.** It does not read
+`core.excludesFile`. It has no idea which files are tracked, so a file that git
+tracks despite matching a pattern is skipped here anyway. And where `.git` is a
+file rather than a directory, which is what a linked worktree and a submodule
+have, it does not follow that file to the repository's `info/exclude`. The
+`.gitignore` files themselves are read normally in all three cases, and the
+error is always toward scanning more than git would.
+
 ## Usage
 
 ```sh
@@ -100,9 +176,11 @@ charck content/            # confirm what will change
 charck --fix content/      # apply
 ```
 
-A path may be a file or a directory, and directories are walked recursively.
-Dot-directories, build output and anything that is not a UTF-8 text file are
-skipped.
+A path may be a file or a directory, and directories are walked recursively. What
+the ignore patterns exclude is left out, and so is anything that is not a UTF-8
+text file. A symlinked directory met during a walk is not descended into, as git
+does not descend into one either, so a subtree reached only through a link is
+not covered by a run over its parent. Name it and it is walked.
 
 ```
 --fix              apply decided actions, rewriting files in place
@@ -110,7 +188,9 @@ skipped.
 --list             print the merged ledger as a decision table
 --config PATH      use only this ledger, ignoring both layers
 --ext .md,.toml    restrict a directory walk by extension
--v / -q            show ignored characters / summary only
+--no-ignore        apply no ignore patterns at all, defaults included
+--no-gitignore     do not read .gitignore, but keep the ledger's patterns
+-v / -q            show ignored characters and paths / summary only
 ```
 
 Exit code `0` means clean, `1` means there is something to look at or apply, and
@@ -142,10 +222,11 @@ new inode, so any other name that shared the old one keeps the old content.
 Extended attributes and ACLs are not carried over either. Symlinks, on the other
 hand, are followed, so the real file is rewritten and the link is left intact.
 
-Two things `charck` will not touch, whatever the ledger says. It never rewrites
+Three things `charck` will not touch, whatever the ledger says. It never rewrites
 itself or a ledger it is currently reading, since that would corrupt the decisions
-the run is acting on. And it refuses a `replace` whose `to` contains the character
-being replaced, because repeated runs could never converge on a fixed point.
+the run is acting on. It never looks inside `.git`. And it refuses a `replace`
+whose `to` contains the character being replaced, because repeated runs could
+never converge on a fixed point.
 
 The tool is under git in every case I use it, and `git diff` is the real review
 step. Run without `--fix` first and read the report.
@@ -187,10 +268,11 @@ not be worth much anyway.
 python3 tests/test_charck.py
 ```
 
-77 cases covering the reporting contract, the ledger layering, and the failure
-modes above. It exits non-zero if anything fails. Six of those cases check the
-`Makefile` and skip themselves on a checkout that has no `make`, so you will see
-71 there.
+148 cases covering the reporting contract, the ledger layering, the ignore rules
+and the failure modes above. It exits non-zero if anything fails. Six of those
+cases check the `Makefile` and skip themselves on a checkout that has no `make`,
+so you will see 142 there. Two more skip themselves when `TMPDIR` is inside a git
+repository, since that repository would then have a say in the result.
 
 ## Disclaimer
 

@@ -21,8 +21,8 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 ## Layout
 
 ```
-charck.py              the entire tool, one module, ~880 lines, stdlib only
-tests/test_charck.py   standalone regression suite, ~420 lines, 77 cases (71 without make)
+charck.py              the entire tool, one module, ~1310 lines, stdlib only
+tests/test_charck.py   standalone regression suite, ~730 lines, 148 cases (142 without make)
 pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
 Makefile               help (default), test, install, uninstall, clean; GNU make 3.81 compatible
 README.md              user-facing docs, written in the author's voice (see Voice below)
@@ -36,12 +36,13 @@ Section comments (`# ---- name ----`) mark the boundaries. In file order:
 | Region | Functions | Purpose |
 |---|---|---|
 | Config discovery | `xdg_config_home`, `global_config`, `find_local_config`, `resolve_layers`, `merge_layers` | Locate and layer the two ledgers |
-| Module constants | `LOCAL_NAME`, `SKIP_DIRS`, `SELF_FILES`, `ACTIONS`, `KEY_RE`, `TABLE_RE`, `CONTEXT`, `HEADER` | |
+| Module constants | `LOCAL_NAME`, `SELF_FILES`, `ACTIONS`, `KEY_RE`, `TABLE_RE`, `CONTEXT`, `HEADER` | |
 | Classification | `is_exempt`, `key_of`, `name_of`, `suggest` | What is reported, and what the ledger suggests |
-| Config | `ConfigError`, `load_config`, `toml_string`, `render_entry`, `append_entries` | Read, validate and append to a ledger |
+| Config | `ConfigError`, `load_config`, `load_patterns`, `toml_string`, `render_entry`, `append_entries` | Read, validate and append to a ledger |
 | Scanning | `read_source`, `iter_lines`, `line_body`, `scan_text`, `safe_context`, `render` | Find findings and display them |
 | Rewriting | `build_pattern`, `apply_decisions`, `write_atomic` | Apply decisions and write files |
-| Walking | `collect` | Expand paths into targets |
+| Ignoring | `DEFAULT_IGNORE`, `ALWAYS_PRUNE`, `POSIX_CLASS`, `class_regex`, `pattern_regex`, `make_rule`, `rule_group`, `ignored_by`, `read_ignore_file`, `inside_git`, `git_root`, `git_groups` | gitignore-syntax patterns, and where they come from |
+| Walking | `walk_tree`, `collect` | Expand paths into targets |
 | CLI | `describe`, `build_parser`, `main`, `cli` | Argument handling, report, exit codes |
 
 `main` returns an exit code. `cli` wraps it and converts exceptions into codes, and
@@ -79,6 +80,25 @@ even if the test suite still passes, so add a test if you find a gap.
   report.
 - **Decode with plain `utf-8`, never `utf-8-sig`,** so a leading BOM surfaces as a
   normal `U+FEFF` finding at line 1 col 1.
+- **A walk never reaches `.git` by any spelling**, whatever a pattern or
+  `--no-ignore` says. Three guards, and a review found the tree by getting past
+  the first two: `ALWAYS_PRUNE` by name, for directories and for the `.git` file
+  a worktree has; `inside_git` on the walk root, so naming one is exit `2`
+  rather than a silent full scan; and `inside_git` on every symlinked file,
+  since `write_atomic` follows a link to the real file and would have rewritten
+  a loose ref while the report named the link. A single file named directly is
+  still scanned. A `--fix` in there corrupts the repository.
+- **A path named directly on the command line is never ignored.** Patterns apply
+  to what a walk discovers, not to what the caller asked for by name. It is the
+  same `direct` flag that reaches a `SELF` file.
+- **Ignoring happens before reading**, in `walk_tree`, so the report and the
+  rewrite still see one identical set of files.
+- **An anchored pattern needs a directory to anchor to.** Every rule is relative
+  to the file it was written in; the global ledger has no such directory, so an
+  anchored pattern there is a `ConfigError` rather than a rule that never fires.
+- **Our own ledger is validated, someone else's `.gitignore` is not.** A pattern
+  `charck` cannot compile is exit `2` from a ledger and a `-v` line from a
+  `.gitignore`. One odd line in a repository's own file must not stop the run.
 - **Exit codes:** `0` clean or fully applied, `1` something to look at or apply,
   `2` operational error. Never let an exception escape as a traceback.
 

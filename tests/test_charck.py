@@ -415,6 +415,339 @@ else:
           "sudo" not in recipes and "pip install" not in recipes,
           [l for l in recipes.splitlines() if "sudo" in l or "pip install" in l])
 
+print("\n== U. the walk obeys the ledger's ignore patterns ==")
+# --no-gitignore throughout: this section is about the ledger, and a .gitignore
+# somewhere above TMPDIR would otherwise decide part of the outcome.
+DASH = "a — b\n"
+U = ROOT / "ig"
+for name in ("build", "vendor", ".github", "node_modules", "deep/a/b", "sub"):
+    (U / name).mkdir(parents=True)
+for name in ("keep.md", "app.js", "app.min.js", "foo", "build/x.md",
+             "vendor/lib.md", "vendor/keep.md", ".github/wf.md",
+             "node_modules/dep.md", "deep/a/b/c.md", "sub/one.md"):
+    (U / name).write_text(DASH, encoding="utf-8")
+# The ledger sits in the tree it describes, which is what anchoring is relative
+# to: a pattern with a slash means "under this file's own directory".
+uc = U / "u.toml"
+# The !vendor/keep.md is here to be defeated: vendor/ is pruned, so the walk
+# never reaches the file the re-include names.
+uc.write_text('[files]\nignore = ["build/", "*.min.js", "vendor/", '
+              '"!vendor/keep.md", "!.github/", "foo/"]\n', encoding="utf-8")
+
+def walked(*a):
+    return run("--config", str(uc), "--no-append", "--no-gitignore", *a).stdout
+
+out = walked(str(U))
+check("an ignored directory is pruned", "build/x.md" not in out, out[:400])
+check("a file pattern skips that file and not its neighbour",
+      "app.min.js" not in out and "app.js" in out, out[:400])
+check("a built-in default still applies", "node_modules/dep.md" not in out, out[:400])
+check("! re-includes what a built-in default hides", ".github/wf.md" in out, out[:400])
+check("a directory-only pattern does not match a file of that name",
+      "%s/foo\n" % U in out, out[:400])
+check("everything unmatched is still scanned",
+      "keep.md" in out and "sub/one.md" in out and "deep/a/b/c.md" in out, out[:400])
+# build, vendor, node_modules, app.min.js. A pruned directory counts once and
+# its contents are never enumerated, which is the point of pruning.
+check("the summary counts what was ignored", "4 ignored" in out,
+      [l for l in out.splitlines() if "scanned" in l])
+
+out = run("--config", str(uc), "--no-append", "--no-gitignore", "-v", str(U)).stdout
+check("-v names the pattern that ignored a path and the file it came from",
+      "[vendor/ from %s]" % uc in out and "[node_modules/ from built-in defaults]" in out,
+      [l for l in out.splitlines() if "ignored" in l])
+
+check("a re-include cannot reach under a pruned directory",
+      "vendor/keep.md" not in walked(str(U)), "")
+# ...but the same re-include works when the parent is filtered rather than
+# pruned, which is what makes the check above about pruning and not about `!`.
+loose = U / "loose.toml"
+loose.write_text('[files]\nignore = ["vendor/*", "!vendor/keep.md"]\n',
+                 encoding="utf-8")
+out = run("--config", str(loose), "--no-append", "--no-gitignore", str(U)).stdout
+check("a re-include does reach under a directory that was only filtered",
+      "vendor/keep.md" in out and "vendor/lib.md" not in out, out[:400])
+check("a directory named directly is scanned though a pattern matches it",
+      "vendor/lib.md" in walked(str(U / "vendor")), "")
+check("a file named directly is scanned though a pattern matches it",
+      "app.min.js" in walked(str(U / "app.min.js")), "")
+
+out = run("--config", str(uc), "--no-append", "--no-ignore", str(U)).stdout
+check("--no-ignore reaches an ignored tree", "node_modules/dep.md" in out, out[:300])
+check("--no-ignore reports nothing as ignored", "0 ignored" in out,
+      [l for l in out.splitlines() if "scanned" in l])
+
+fixc = ROOT / "ig" / "fix.toml"
+fixc.write_text('[files]\nignore = ["vendor/", "*.min.js"]\n'
+                '[chars."U+2014"]\naction = "replace"\nto = "-"\n', encoding="utf-8")
+run("--config", str(fixc), "--no-append", "--no-gitignore", "--fix", "-q", str(U))
+check("--fix leaves an ignored file byte-identical",
+      (U / "vendor" / "lib.md").read_text(encoding="utf-8") == DASH,
+      repr((U / "vendor" / "lib.md").read_text(encoding="utf-8")))
+check("--fix does rewrite what was scanned",
+      (U / "keep.md").read_text(encoding="utf-8") == "a - b\n",
+      repr((U / "keep.md").read_text(encoding="utf-8")))
+
+print("\n== U2. glob syntax: what a * may and may not cross ==")
+G = ROOT / "globs"
+(G / "a" / "b").mkdir(parents=True)
+for name in ("x.md", "a/x.md", "a/y.md", "a/b/z.md"):
+    (G / name).write_text(DASH, encoding="utf-8")
+gc = G / "g.toml"
+
+def globbed(pattern):
+    gc.write_text('[files]\nignore = ["%s"]\n' % pattern, encoding="utf-8")
+    return run("--config", str(gc), "--no-append", "--no-gitignore", str(G)).stdout
+
+out = globbed("a/*.md")
+check("* does not cross a slash",
+      "a/y.md" not in out and "a/b/z.md" in out, out[:400])
+out = globbed("a/**/z.md")
+check("** crosses a slash", "a/b/z.md" not in out and "a/y.md" in out, out[:400])
+out = globbed("x.md")
+check("a bare name matches at any depth",
+      "a/x.md" not in out and "%s/x.md" % G not in out, out[:400])
+out = globbed("/x.md")
+check("a leading slash anchors to the ledger's own directory",
+      "a/x.md" in out and "%s/x.md\n" % G not in out, out[:400])
+out = globbed("[xy].md")
+check("a character class matches within one segment",
+      "a/x.md" not in out and "a/y.md" not in out and "a/b/z.md" in out, out[:400])
+out = globbed("**/z.md")
+check("a leading **/ is the any-depth form", "a/b/z.md" not in out, out[:400])
+
+print("\n== V. .gitignore is honoured, and only inside a work tree ==")
+V = ROOT / "repo"
+(V / "sub" / "deeper").mkdir(parents=True)
+(V / ".git" / "info").mkdir(parents=True)
+for name in ("top.md", "skip.md", "sub/keep.md", "sub/hide.md", "sub/deeper/x.md"):
+    (V / name).write_text(DASH, encoding="utf-8")
+(V / ".gitignore").write_text("skip.md\nhide.md\n", encoding="utf-8")
+vc = cfg("v.toml", "")
+
+def repo_out(*a):
+    return run("--config", vc, "--no-append", *a).stdout
+
+out = repo_out(str(V))
+check("a repo-root .gitignore is applied",
+      "skip.md" not in out and "sub/hide.md" not in out, out[:400])
+check("...and everything else is scanned",
+      "top.md" in out and "sub/keep.md" in out and "deeper/x.md" in out, out[:400])
+check("a .gitignore above the walked directory still applies",
+      "sub/hide.md" not in repo_out(str(V / "sub")), "")
+check("--no-gitignore stops reading them", "skip.md" in repo_out("--no-gitignore", str(V)),
+      "")
+
+(V / "sub" / ".gitignore").write_text("!hide.md\nkeep.md\n", encoding="utf-8")
+out = repo_out(str(V))
+check("a deeper .gitignore overrides a shallower one",
+      "sub/hide.md" in out and "sub/keep.md" not in out, out[:400])
+
+(V / ".git" / "info" / "exclude").write_text("top.md\n", encoding="utf-8")
+check(".git/info/exclude is read", "top.md" not in repo_out(str(V)), "")
+
+vc2 = cfg("v2.toml", '[files]\nignore = ["!skip.md"]\n')
+check("a ledger pattern has the last word over .gitignore",
+      "skip.md" in run("--config", vc2, "--no-append", str(V)).stdout, "")
+
+W = ROOT / "wtree"; W.mkdir()
+# A worktree and a submodule have .git as a file, not a directory. The em dash
+# in it is what makes the check below mean something: without a reportable
+# character, silence would prove nothing.
+(W / ".git").write_text("gitdir: /nowhere — x\n", encoding="utf-8")
+(W / ".gitignore").write_text("hide.md\n", encoding="utf-8")
+for name in ("hide.md", "keep.md"):
+    (W / name).write_text(DASH, encoding="utf-8")
+out = repo_out(str(W))
+check("a .git file marks a work tree just as a .git directory does",
+      "hide.md" not in out and "keep.md" in out, out[:400])
+r = run("--config", vc, "--no-append", "--no-ignore", "-v", str(W))
+check("a .git file is never scanned, even under --no-ignore",
+      "gitdir" not in r.stdout, r.stdout[:400])
+control = ROOT / "wcontrol"; control.mkdir()
+(control / "notgit").write_text("gitdir: /nowhere — x\n", encoding="utf-8")
+check("...and the same bytes under any other name are reported",
+      "gitdir" in run("--config", vc, "--no-append", "--no-ignore",
+                      str(control)).stdout, "")
+
+G = ROOT / "gitesc"; (G / "repo" / ".git").mkdir(parents=True)
+(G / "repo" / ".git" / "HEAD").write_text(DASH, encoding="utf-8")
+(G / "repo" / "notes.md").symlink_to(Path(".git") / "HEAD")
+gc2 = cfg("gitesc.toml", '[chars."U+2014"]\naction = "replace"\nto = "-"\n')
+r = run("--config", gc2, "--no-append", "--fix", "-q", str(G))
+check("a symlink leading back into .git is not followed by a walk",
+      (G / "repo" / ".git" / "HEAD").read_text(encoding="utf-8") == DASH,
+      repr((G / "repo" / ".git" / "HEAD").read_text(encoding="utf-8")))
+(G / "dotgit").symlink_to(G / "repo" / ".git")     # a name that hides it
+(G / "alias").symlink_to(G / "repo")               # .git under a linked parent
+for label, arg in [("named directly", G / "repo" / ".git"),
+                   ("through a symlink to it", G / "dotgit"),
+                   ("through a symlinked parent", G / "alias" / ".git")]:
+    r = run("--config", gc2, "--no-append", "--fix", "-q", str(arg))
+    check("walking .git %s is refused with exit 2" % label, r.returncode == 2,
+          "exit=%d %s" % (r.returncode, r.stderr[-120:]))
+check("...and nothing in there was rewritten",
+      (G / "repo" / ".git" / "HEAD").read_text(encoding="utf-8") == DASH)
+check("a single file inside .git named directly is still scanned",
+      "HEAD" in run("--config", vc, "--no-append",
+                    str(G / "repo" / ".git" / "HEAD")).stdout, "")
+
+(V / "unreadable.gitignore").write_text("", encoding="utf-8")
+NR = ROOT / "norepo"; NR.mkdir()
+(NR / ".gitignore").write_text("hide.md\n", encoding="utf-8")
+(NR / "hide.md").write_text(DASH, encoding="utf-8")
+inner = NR / "inner"; (inner / ".git").mkdir(parents=True)
+(inner / ".gitignore").write_text("hide.md\n", encoding="utf-8")
+(inner / "hide.md").write_text(DASH, encoding="utf-8")
+if any((p / ".git").exists() for p in ROOT.parents):
+    # TMPDIR inside somebody's repository: that repo decides, not this test.
+    print("  SKIP  TMPDIR is itself inside a work tree")
+else:
+    out = repo_out(str(NR))
+    check("a .gitignore outside any work tree is not read",
+          "%s/hide.md" % NR in out, out[:300])
+    check("...but a repository below the walk root is still honoured",
+          "inner/hide.md" not in out, out[:300])
+
+L = ROOT / "lenient"; (L / ".git").mkdir(parents=True)
+# Someone else's file, so one line we cannot compile must not stop the run.
+(L / ".gitignore").write_text("../oops\nhide.md\n", encoding="utf-8")
+for name in ("hide.md", "ok.md"):
+    (L / name).write_text(DASH, encoding="utf-8")
+r = run("--config", vc, "--no-append", str(L))
+check("an unusable .gitignore line does not stop the run",
+      r.returncode == 1 and "ok.md" in r.stdout, "exit=%d %s" % (r.returncode, r.stderr[-160:]))
+check("...and the lines around it still apply", "hide.md" not in r.stdout, r.stdout[:300])
+check("...and -v says which line could not be used",
+      "unusable pattern" in run("--config", vc, "--no-append", "-v", str(L)).stdout, "")
+
+print("\n== W. an unusable pattern in our own ledger is exit 2, not a no-op ==")
+for label, body in [
+        ("empty pattern", '[files]\nignore = [""]\n'),
+        ("lone !", '[files]\nignore = ["!"]\n'),
+        ("trailing backslash", '[files]\nignore = ["foo\\\\"]\n'),
+        (".. segment", '[files]\nignore = ["../x"]\n'),
+        ("empty path segment", '[files]\nignore = ["a//b"]\n'),
+        ("uncompilable character class", '[files]\nignore = ["[z-a].md"]\n'),
+        ("unknown POSIX class", '[files]\nignore = ["[[:bogus:]].md"]\n'),
+        ("ignore not an array", '[files]\nignore = "build/"\n'),
+        ("non-string element", '[files]\nignore = [5]\n'),
+        ("unknown key in [files]", '[files]\nignores = ["build/"]\n'),
+        ("files not a table", "files = 5\n")]:
+    r = run("--config", cfg("w.toml", body), "--no-append", str(src("w.md", "a\n")))
+    check("%s -> exit 2" % label, r.returncode == 2,
+          "exit=%d %s" % (r.returncode, r.stderr[-120:]))
+
+whome = ROOT / "whome"; (whome / "charck").mkdir(parents=True)
+wenv = dict(os.environ, XDG_CONFIG_HOME=str(whome))
+wdir = ROOT / "wdir"; wdir.mkdir()
+for name in ("app.js", "app.min.js"):
+    (wdir / name).write_text(DASH, encoding="utf-8")
+
+def in_whome(body, *a):
+    (whome / "charck" / "charck.toml").write_text(body, encoding="utf-8")
+    return subprocess.run([sys.executable, TOOL, "--no-append", "--no-gitignore", *a],
+                          capture_output=True, text=True, cwd=str(wdir), env=wenv)
+
+r = in_whome('[files]\nignore = ["src/x.md"]\n', ".")
+check("an anchored pattern in the global ledger -> exit 2", r.returncode == 2,
+      "exit=%d %s" % (r.returncode, r.stderr[-160:]))
+check("...and the error says where the pattern belongs",
+      ".charck.toml" in r.stderr, r.stderr[-160:])
+r = in_whome('[files]\nignore = ["*.min.js"]\n', ".")
+check("an unanchored pattern in the global ledger applies everywhere",
+      "app.min.js" not in r.stdout and "app.js" in r.stdout, r.stdout[:300])
+
+print("\n== X. the corners where gitignore and Python regex disagree ==")
+# Every case here was a real divergence from `git ls-files --others
+# --exclude-standard`, and each one hid files from the scan rather than showing
+# too many, which is the direction that makes a build gate lie.
+X = ROOT / "corners"; (X / "d1" / "x").mkdir(parents=True)
+# Single-letter basenames, so a class matches the name and not just part of it,
+# plus one longer name that every class here must leave alone.
+for name in ("w.md", "a.md", "long.md", "d1/b.md", "d1/w.md", "d1/x/b.md"):
+    (X / name).write_text(DASH, encoding="utf-8")
+xc = X / "x.toml"
+
+def cornered(pattern, *a):
+    xc.write_text('[files]\nignore = ["%s"]\n' % pattern, encoding="utf-8")
+    return run("--config", str(xc), "--no-append", "--no-gitignore", *a, str(X))
+
+out = cornered("[\\\\w].md").stdout
+check("a backslash in a character class is a literal, not a Python class",
+      "a.md" in out and "d1/b.md" in out and "w.md" not in out, out[:400])
+out = cornered("d1[/]a").stdout
+check("a / inside a character class never matches a separator",
+      "d1/b.md" in out and "a.md" in out, out[:400])
+out = cornered("d1/**b.md").stdout
+check("** is a plain * where it is not a whole path segment",
+      "d1/x/b.md" in out and "d1/b.md" not in out, out[:400])
+r = cornered("[[:alpha:]].md")
+check("a POSIX class is spelled out, not passed through",
+      "w.md" not in r.stdout and "long.md" in r.stdout, r.stdout[:400])
+check("...and Python's regex internals never reach stderr",
+      "FutureWarning" not in r.stderr, r.stderr[-200:])
+out = cornered("[!w].md").stdout
+check("a negated class does not match a separator either",
+      "w.md" in out and "a.md" not in out, out[:400])
+
+# 11 stacked globstars took 23 seconds before they were collapsed at compile
+# time; the walk pays it per path.
+deep = X / "deep"
+here = deep
+for i in range(22):
+    here = here / ("l%d" % i)
+here.mkdir(parents=True)
+(here / "zzz.md").write_text(DASH, encoding="utf-8")
+xc.write_text('[files]\nignore = ["%sx.md"]\n' % ("**/" * 11), encoding="utf-8")
+try:
+    r = subprocess.run([sys.executable, TOOL, "--config", str(xc), "--no-append",
+                        "--no-gitignore", "-q", str(X)],
+                       capture_output=True, text=True, timeout=20)
+    check("stacked globstars do not blow up the walk", True)
+except subprocess.TimeoutExpired:
+    check("stacked globstars do not blow up the walk", False, "timed out")
+
+print("\n== Y. a .gitignore is read the way git reads it ==")
+Y = ROOT / "readgi"; (Y / ".git").mkdir(parents=True)
+for name in ("a.md", "b.md"):
+    (Y / name).write_text(DASH, encoding="utf-8")
+(Y / "a ").write_text(DASH, encoding="utf-8")       # trailing space in the name
+yc = cfg("y.toml", "")
+
+def gitignored(body, *a):
+    (Y / ".gitignore").write_bytes(body)
+    return run("--config", yc, "--no-append", *a, str(Y)).stdout
+
+# The tool exists to find invisible characters; one in a .gitignore used to
+# make its first pattern silently match nothing.
+out = gitignored(b"\xef\xbb\xbfa.md\n")
+check("a BOM does not disarm the first pattern",
+      "a.md" not in out and "b.md" in out, out[:400])
+out = gitignored(b"a.md\r\nb.md\r\n")
+check("CRLF line endings are handled", "a.md" not in out and "b.md" not in out,
+      out[:400])
+out = gitignored(b"a\\ \n")
+check("an escaped trailing space is kept",
+      "%s/a \n" % Y not in out and "a.md" in out, out[:400])
+out = gitignored(b"a.md   \n")
+check("unescaped trailing spaces are dropped", "a.md" not in out, out[:400])
+out = gitignored(b"#a.md\n\n   \nb.md\n")
+check("comments and blank lines are skipped",
+      "a.md" in out and "b.md" not in out, out[:400])
+
+(Y / ".gitignore").write_bytes(b"a.md\n")
+os.chmod(Y / ".gitignore", 0o000)
+try:
+    r = run("--config", yc, "--no-append", "-v", str(Y))
+    check("an unreadable .gitignore is reported rather than passed over",
+          "unreadable" in r.stdout, [l for l in r.stdout.splitlines()
+                                     if "unreadable" in l or "scanned" in l])
+    check("...and the run still finishes normally", r.returncode == 1,
+          "exit=%d" % r.returncode)
+finally:
+    os.chmod(Y / ".gitignore", 0o644)
+
 print("\n%d passed, %d failed" % (passed, failed))
 shutil.rmtree(ROOT, ignore_errors=True)
 sys.exit(1 if failed else 0)
