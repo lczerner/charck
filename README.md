@@ -310,14 +310,19 @@ not be worth much anyway.
 ## Tests
 
 ```sh
-python3 tests/test_charck.py
+make test
 ```
 
-196 cases covering the reporting contract, the ledger layering, the ignore rules
-and the failure modes above. It exits non-zero if anything fails. Six of those
-cases check the `Makefile` and skip themselves on a checkout that has no `make`,
-so you will see 190 there. Two more skip themselves when `TMPDIR` is inside a git
-repository, since that repository would then have a say in the result.
+The suite is pytest and lives in `tests/`, one module per area: rewriting,
+reporting, the ledger and its layers, the ignore rules, `.gitignore`, `--exclude`
+and the `Makefile`. `make test` builds the `.venv` first if it is not there yet
+and runs the suite from it, so the first run needs `pip` and the network;
+`.venv/bin/pytest tests/test_ignore.py` afterwards runs a single module.
+
+A few cases skip themselves rather than lie: the `Makefile` ones on a checkout
+with no `make`, two `.gitignore` ones when `TMPDIR` is inside a git repository
+that would otherwise have a say in the result, and the permission ones when you
+are root.
 
 ## Lint
 
@@ -327,9 +332,9 @@ make lint
 ```
 
 `make venv` builds a virtualenv in `.venv` from the `dev` extra in
-`pyproject.toml`, and `make lint` runs `flake8` from it over `charck.py`. That is
-the only development dependency there is; the tool itself still needs nothing
-outside the standard library.
+`pyproject.toml`, and `make lint` runs `flake8` from it over `charck.py` and
+`tests/`. `flake8` and `pytest` are the only development dependencies there are;
+the tool itself still needs nothing outside the standard library.
 
 ## Disclaimer
 

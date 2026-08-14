@@ -21,10 +21,10 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 ## Layout
 
 ```
-charck.py              the entire tool, one module, ~1685 lines, stdlib only
-tests/test_charck.py   standalone regression suite, ~1025 lines, 196 cases (190 without make)
+charck.py              the entire tool, one module, ~1710 lines, stdlib only
+tests/                 pytest regression suite, conftest.py plus one module per area
 pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
-Makefile               help (default), test, install, uninstall, clean; GNU make 3.81 compatible
+Makefile               help (default), venv, test, lint, install, uninstall, clean; GNU make 3.81 compatible
 README.md              user-facing docs
 .gitignore             ignores .charck.toml, .*.charck-tmp, and the usual Python noise
 ```
@@ -119,28 +119,36 @@ even if the test suite still passes, so add a test if you find a gap.
 ## Commands
 
 ```sh
-make test                              # or: python3 tests/test_charck.py
+make test                              # pytest from the .venv, builds it if needed
 make venv                              # dev virtualenv in .venv, from the dev extra
-make lint                              # flake8 on charck.py, needs the .venv
+make lint                              # flake8 on charck.py and tests/, needs the .venv
 make help                              # the target list, and the default goal
+.venv/bin/pytest tests/test_ignore.py  # one module, while working on that surface
 python3 -m py_compile charck.py        # syntax check
 ```
 
-`flake8` is the only development dependency, and `make lint` runs it with its
-defaults, so `charck.py` wraps at 79 columns and is kept clean. There is no
-formatter and no CI. The test suite is the gate.
+`flake8` and `pytest` are the development dependencies, and `make lint` runs
+flake8 with its defaults, so `charck.py` and the tests wrap at 79 columns and are
+kept clean. There is no formatter and no CI. The test suite is the gate.
 
 `make install` goes through pipx, so the tool lands in its own virtualenv under
 `~/.local/pipx/venvs` with the command linked into `~/.local/bin`. Nothing is
-written outside `$HOME`, and `make uninstall` undoes it. Section `T` of the suite
+written outside `$HOME`, and `make uninstall` undoes it. `tests/test_makefile.py`
 asserts that: no recipe may use `sudo` or a bare `pip install`. The Makefile
 targets `python3` and GNU make 3.81, which is what macOS ships, so no `.ONESHELL`
 and no `$(file ...)`.
 
-`tests/test_charck.py` is a plain script, not pytest. It defines `check(label,
-cond, extra)` and counts passes and failures. Sections are lettered (`A.`, `B.`,
-...) and named after the failure mode they pin down. Add new cases in that style,
-and always assert on real observed bytes rather than on the report text alone.
+The suite is pytest, one module per area, and every test drives `charck.py` as a
+subprocess: nothing imports it. A test is named after the failure mode it pins
+down, holds one behaviour, and asserts on real observed bytes rather than on the
+report text alone. Shared machinery lives in `tests/conftest.py`: the `charck`
+runner, the `cfg`, `src` and `tree` builders under `tmp_path`, and `restore_mode`
+for the permission cases. Two of them keep a real ledger out of a run, and both
+matter: an autouse fixture points `HOME` and `XDG_CONFIG_HOME` at a directory of
+the test's own, and the runner defaults its working directory to `tmp_path`,
+since from the checkout `charck` would walk up and find the repository's own
+`.charck.toml`. Keep the asserts in the test functions, where pytest can
+introspect them, and put a table of cases into `parametrize` rather than a loop.
 
 ### Comments
 
@@ -164,8 +172,7 @@ Follow these steps in order for any non-trivial change. Do not skip ahead.
    anything fails, fix it and iterate until clean.
 
 4. **Write new tests for the functionality you just created**, then run the whole
-   suite again. Fix and iterate until it passes. Update the test count in
-   `README.md` if it changed.
+   suite again. Fix and iterate until it passes.
 
 5. **Run an expert reviewer subagent** focused on finding design issues and bugs,
    and have it produce a report for you. Give it the concrete file paths, tell it
