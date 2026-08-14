@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """charck - check text files for non-ASCII characters, and repair them.
 
-Reports every character that is not printable ASCII, with codepoint, name, count
-and exact position. The only exemption is Latin letters with diacritics (a e i c
-r s z ...), so ordinary Latin-script prose in any language is not flagged on
-every run; ligatures and fullwidth forms are still reported, being paste
-artifacts rather than letters.
+Reports every character that is not printable ASCII, with codepoint, name,
+count and exact position. The only exemption is Latin letters with diacritics
+(a e i c r s z ...), so ordinary Latin-script prose in any language is not
+flagged on every run; ligatures and fullwidth forms are still reported, being
+paste artifacts rather than letters.
 
 What to do about each character is recorded in a ledger. Detection appends
-newly-seen characters there as undecided; you fill in delete / replace / ignore;
-later runs apply those decisions.
+newly-seen characters there as undecided; you fill in delete / replace /
+ignore; later runs apply those decisions.
 
 There are two ledgers, and they layer per character:
 
@@ -18,43 +18,45 @@ There are two ledgers, and they layer per character:
                                  from the working directory
 
 A character decided in the local ledger uses that decision; every other
-character falls back to the global one. So a project can disagree about a single
-character without restating the rest.
+character falls back to the global one. So a project can disagree about a
+single character without restating the rest.
 
-The global ledger is never written to. It is yours to edit by hand, and nothing
-the tool discovers is added to it automatically. Newly-seen characters go to the
-local ledger, which is created in the working directory if none is in scope.
-`--config PATH` ignores both layers and reads and appends to exactly that file.
+The global ledger is never written to. It is yours to edit by hand, and
+nothing the tool discovers is added to it automatically. Newly-seen characters
+go to the local ledger, which is created in the working directory if none is
+in scope. `--config PATH` ignores both layers and reads and appends to exactly
+that file.
 
 What a walk leaves alone is recorded in the same ledger, in gitignore syntax:
 
   [files]
   ignore = ["build/", "*.min.js", "!keep.md"]
 
-Those patterns are applied after a set of built-in ones (dot-files, node_modules
-and the usual build output) which a `!` pattern can override, and after any
-.gitignore in scope, which is read unless --no-gitignore says otherwise. A path
-named directly on the command line is never ignored, and .git is never walked
-into whatever the patterns say.
+Those patterns are applied after a set of built-in ones (dot-files,
+node_modules and the usual build output) which a `!` pattern can override, and
+after any .gitignore in scope, which is read unless --no-gitignore says
+otherwise. A path named directly on the command line is never ignored, and
+.git is never walked into whatever the patterns say.
 
-`--exclude PATTERN` adds one more pattern, in the same syntax, from the command
-line. It outranks every recorded one, and it is written to the ledger as the run
-goes, so a first run over a tree can leave out what it should and every later run
-already knows. --no-append applies it to this run only.
+`--exclude PATTERN` adds one more pattern, in the same syntax, from the
+command line. It outranks every recorded one, and it is written to the ledger
+as the run goes, so a first run over a tree can leave out what it should and
+every later run already knows. --no-append applies it to this run only.
 
 Caveats worth knowing:
 
-  Cn (unassigned) is Unicode-version-dependent. A character assigned in a Unicode
-  release newer than this Python's will read as unassigned here. Such findings are
-  labelled so a false positive is visible before you decide to delete them.
+  Cn (unassigned) is Unicode-version-dependent. A character assigned in a
+  Unicode release newer than this Python's will read as unassigned here. Such
+  findings are labelled so a false positive is visible before you decide to
+  delete them.
 
   Co (private use, U+E000-F8FF) is where Nerd Font and Powerline glyphs live. A
   "delete" decision on those would strip prompt icons from a shell config.
 
-  --fix replaces files atomically, which breaks hardlinks: a rewritten file gets a
-  new inode, so any other name that shared the old one keeps the old content.
-  Extended attributes and ACLs are not carried over either. Symlinks are followed,
-  so the real file is rewritten and the link is left intact.
+  --fix replaces files atomically, which breaks hardlinks: a rewritten file
+  gets a new inode, so any other name that shared the old one keeps the old
+  content. Extended attributes and ACLs are not carried over either. Symlinks
+  are followed, so the real file is rewritten and the link is left intact.
 """
 
 import argparse
@@ -74,11 +76,12 @@ except ImportError:                                    # pragma: no cover
 SCRIPT = Path(__file__).resolve()
 UNICODE_VERSION = unicodedata.unidata_version
 
-# Two layers. The global ledger holds decisions that hold everywhere; a project
-# may override individual characters, and only those, in a local ledger found by
-# walking up from the working directory. Deliberately not "beside the script":
-# an installed copy lives in site-packages, which may be read-only and is
-# replaced on upgrade, which would silently discard every recorded decision.
+# Two layers. The global ledger holds decisions that hold everywhere; a
+# project may override individual characters, and only those, in a local
+# ledger found by walking up from the working directory. Deliberately not
+# "beside the script": an installed copy lives in site-packages, which may be
+# read-only and is replaced on upgrade, which would silently discard every
+# recorded decision.
 LOCAL_NAME = ".charck.toml"
 
 
@@ -106,12 +109,12 @@ def find_local_config(start=None):
 def resolve_layers(explicit=None):
     """Return ([(layer, base)] lowest priority first, path-appended-to).
 
-    `base` is the directory an anchored ignore pattern in that layer is relative
-    to, as gitignore anchors to the directory of the file it is written in. The
-    global ledger has no such directory, and None says so.
+    `base` is the directory an anchored ignore pattern in that layer is
+    relative to, as gitignore anchors to the directory of the file it is
+    written in. The global ledger has no such directory, and None says so.
 
-    An explicit --config replaces the whole stack, so scripted and test runs get
-    exactly the file they name and nothing else.
+    An explicit --config replaces the whole stack, so scripted and test runs
+    get exactly the file they name and nothing else.
     """
     if explicit is not None:
         path = Path(explicit)
@@ -149,6 +152,7 @@ def merge_layers(layers):
             groups.append(rule_group(patterns, base, path, label))
     return config, source, groups
 
+
 # This script and the ledger it is reading describe the characters we hunt, so
 # rewriting them would corrupt the tool itself. Scanned and reported, but never
 # rewritten unless named directly on the command line. The config file actually
@@ -172,8 +176,8 @@ HEADER = """\
 #            "ignore"   intentionally keep, drop from future reports
 #
 # `collapse = true` on a replace also eats spaces/tabs either side of the
-# character, so "a - b" does not become "a  -  b". Indentation at the start of a
-# line is never eaten.
+# character, so "a - b" does not become "a  -  b". Indentation at the start
+# of a line is never eaten.
 #
 # Paths a walk should leave alone go in a [files] table, in gitignore syntax:
 #
@@ -227,8 +231,8 @@ def name_of(ch):
     return "<unassigned, Unicode %s>" % UNICODE_VERSION
 
 
-# Suggestions are comments only. The script never acts on one; it acts solely on
-# an `action` you have written yourself.
+# Suggestions are comments only. The script never acts on one; it acts solely
+# on an `action` you have written yourself.
 def suggest(ch):
     cp, cat = ord(ch), unicodedata.category(ch)
     typography = {
@@ -245,8 +249,10 @@ def suggest(ch):
         0x00B7: ('action = "replace", to = "-"', None),
         0x2192: ('action = "replace", to = "->"', None),
         0x2190: ('action = "replace", to = "<-"', None),
-        0xFB01: ('action = "replace", to = "fi"', "ligature, usually a PDF paste"),
-        0xFB02: ('action = "replace", to = "fl"', "ligature, usually a PDF paste"),
+        0xFB01: ('action = "replace", to = "fi"',
+                 "ligature, usually a PDF paste"),
+        0xFB02: ('action = "replace", to = "fl"',
+                 "ligature, usually a PDF paste"),
     }
     if cp in typography:
         return typography[cp]
@@ -255,7 +261,8 @@ def suggest(ch):
                 "stray CR; a CR that ends a CRLF line is never touched")
     if cp == 0xFFFD:
         return ('action = "delete"',
-                "mojibake marker - evidence of prior data loss, inspect the source")
+                "mojibake marker - evidence of prior data loss, "
+                "inspect the source")
     if cp == 0xFEFF:
         return ('action = "delete"', "byte order mark")
     if cat == "Zs":
@@ -282,7 +289,8 @@ def suggest(ch):
     if "FILLER" in unicodedata.name(ch, "") or cp == 0x2800:
         return ('action = "delete"', "renders as blank")
     if cat == "Mn":
-        return ('action = "delete"', "combining mark - text may be NFD-decomposed")
+        return ('action = "delete"',
+                "combining mark - text may be NFD-decomposed")
     return (None, None)
 
 
@@ -342,15 +350,15 @@ def load_config(path, base=None):
                     % (path, key, to))
             if to == "":
                 raise ConfigError(
-                    '%s: [chars.%s] action = "replace" needs a non-empty `to`; '
-                    'use action = "delete" to remove the character'
+                    '%s: [chars.%s] action = "replace" needs a non-empty '
+                    '`to`; use action = "delete" to remove the character'
                     % (path, key))
             if chr(cp) in to:
                 # Each run would reintroduce the character and grow `to` again,
                 # so the file could never reach a fixed point.
                 raise ConfigError(
-                    "%s: [chars.%s] to = %s contains the character it replaces, "
-                    "so repeated runs would never converge"
+                    "%s: [chars.%s] to = %s contains the character it "
+                    "replaces, so repeated runs would never converge"
                     % (path, key, toml_string(to)))
 
         collapse = entry.get("collapse", False)
@@ -384,8 +392,9 @@ def load_patterns(path, files):
     if files is None:
         return []
     if not isinstance(files, dict):
-        raise ConfigError("%s: `files` must be a table holding `ignore`, not %s"
-                          % (path, type(files).__name__))
+        raise ConfigError(
+            "%s: `files` must be a table holding `ignore`, not %s"
+            % (path, type(files).__name__))
     for key in files:
         if key != "ignore":
             raise ConfigError("%s: [files] has no `%s` key; the only one is "
@@ -494,7 +503,8 @@ def array_end(text, start):
 
 
 def splice(text, inserts):
-    """Apply (offset, string) insertions, last one first so the offsets hold."""
+    """Apply (offset, string) insertions, last one first so the offsets
+    hold."""
     for at, added in reversed(inserts):
         text = text[:at] + added + text[at:]
     return text
@@ -523,8 +533,9 @@ def ignore_insert(text, patterns):
         return None
     at, comma, multi, indent = span
     if not multi:
-        return splice(text, [(at, ("" if comma else ", ")
-                                  + ", ".join(toml_string(p) for p in patterns))])
+        added = ("" if comma else ", ") + ", ".join(
+            toml_string(p) for p in patterns)
+        return splice(text, [(at, added)])
     inserts = [] if comma else [(at, ",")]
     nl = text.find("\n", at)
     rest = text[at:nl].strip() if nl != -1 else None
@@ -541,11 +552,11 @@ def ignore_insert(text, patterns):
 def open_ledger(path):
     """Open the ledger for reading and appending, creating it, and lock it.
 
-    O_APPEND stays: it puts every write at the end of the file whatever the seek
-    says, and where there is no fcntl to lock with that is the only thing
+    O_APPEND stays: it puts every write at the end of the file whatever the
+    seek says, and where there is no fcntl to lock with that is the only thing
     keeping two runs from writing over each other. An insertion into the array
-    cannot go through this handle at all, and does not: `append_patterns` hands
-    that to `write_atomic` under this same lock.
+    cannot go through this handle at all, and does not: `append_patterns`
+    hands that to `write_atomic` under this same lock.
 
     Binary, so that decoding is explicit and a ledger that is not UTF-8 comes
     back as an error rather than an exception from the middle of a read.
@@ -618,9 +629,9 @@ def append_patterns(path, patterns):
         new = ignore_insert(existing, fresh)
         if new is None:
             return [], fresh
-        # The whole document, not just the array: an insertion that lands in the
-        # wrong place can still parse, and comparing the parse against the one
-        # we started from is what catches it.
+        # The whole document, not just the array: an insertion that lands in
+        # the wrong place can still parse, and comparing the parse against the
+        # one we started from is what catches it.
         want = dict(data)
         want["files"] = dict(files, ignore=have + fresh)
         try:
@@ -636,8 +647,8 @@ def append_entries(path, chars, counts):
     """Append undecided entries for `chars`. Never rewrites existing bytes, so
     hand edits, comments and ordering survive.
 
-    Holds an exclusive lock and re-reads under it, so two concurrent runs cannot
-    append the same table twice and brick the ledger.
+    Holds an exclusive lock and re-reads under it, so two concurrent runs
+    cannot append the same table twice and brick the ledger.
     """
     with open_ledger(path) as fh:
         existing = read_ledger(fh, path)
@@ -649,8 +660,8 @@ def append_entries(path, chars, counts):
         if not existing:
             parts.append(HEADER)
         elif not existing.endswith("\n"):
-            # A hand-edited file may lack a final newline; appending straight on
-            # to that last line would produce invalid TOML.
+            # A hand-edited file may lack a final newline; appending straight
+            # on to that last line would produce invalid TOML.
             parts.append("\n")
         parts.append("\n".join(render_entry(ch, counts[ch]) for ch in fresh))
         parts.append("\n")
@@ -760,7 +771,8 @@ def build_pattern(config):
 
     A single left-to-right re.sub pass means replacement output is never
     re-examined, so a `to` value may safely contain a character that is itself
-    configured, results do not depend on entry order, and repeated runs converge.
+    configured, results do not depend on entry order, and repeated runs
+    converge.
     """
     order, parts = [], []
     for ch, entry in sorted(config.items(), key=lambda kv: ord(kv[0])):
@@ -800,8 +812,9 @@ def apply_decisions(text, config):
         got = match.group()
         start = match.start()
         if start == 0 or match.string[start - 1] == "\n":
-            # At the start of a line the leading run is indentation, not spacing
-            # around the character, so keep it and only collapse to its right.
+            # At the start of a line the leading run is indentation, not
+            # spacing around the character, so keep it and only collapse to
+            # its right.
             indent = got[:len(got) - len(got.lstrip(" \t"))]
             return indent + to.lstrip(" \t")
         return to
@@ -810,13 +823,13 @@ def apply_decisions(text, config):
 
 
 def write_atomic(path, text):
-    # Follow symlinks: rewrite the file the content was read from, and leave the
-    # link itself in place.
+    # Follow symlinks: rewrite the file the content was read from, and leave
+    # the link itself in place.
     target = Path(os.path.realpath(path))
     mode = target.stat().st_mode
-    # mkstemp, not a fixed name: a predictable sibling could already exist (and
-    # be clobbered) or be a symlink pointing somewhere else. It is created 0600,
-    # so the content is never briefly world-readable.
+    # mkstemp, not a fixed name: a predictable sibling could already exist
+    # (and be clobbered) or be a symlink pointing somewhere else. It is
+    # created 0600, so the content is never briefly world-readable.
     fd, tmpname = tempfile.mkstemp(dir=str(target.parent),
                                    prefix="." + target.name + ".",
                                    suffix=".charck-tmp")
@@ -920,11 +933,12 @@ def pattern_regex(text):
             j = i
             while j < n and text[j] == "*":
                 j += 1
-            segment = (i == 0 or text[i - 1] == "/") and (j == n or text[j] == "/")
+            segment = ((i == 0 or text[i - 1] == "/")
+                       and (j == n or text[j] == "/"))
             if j - i >= 2 and segment:
                 if j == n:
-                    # Trailing **: everything below. (?s:), since a newline is a
-                    # legal character in a path segment and this tool of all
+                    # Trailing **: everything below. (?s:), since a newline is
+                    # a legal character in a path segment and this tool of all
                     # tools does not get to pretend otherwise.
                     out.append("(?s:.*)")
                 else:
@@ -972,8 +986,9 @@ def make_rule(pattern, base, where, label, absolute=False):
 
     With `absolute`, an anchored pattern carries `base` in its own expression
     rather than relying on the group's prefix. That is what lets a --exclude
-    apply to a tree outside the working directory: the unanchored patterns match
-    wherever the walk goes, and the anchored ones still mean "under here".
+    apply to a tree outside the working directory: the unanchored patterns
+    match wherever the walk goes, and the anchored ones still mean "under
+    here".
     """
     text, negated = pattern, False
     if text.startswith("!"):
@@ -1006,8 +1021,8 @@ def make_rule(pattern, base, where, label, absolute=False):
         if "" in segments:
             fault = "has an empty path segment"
         elif "." in segments or ".." in segments:
-            fault = "has a . or .. segment, and patterns are relative to the " \
-                    "directory of the file they are written in"
+            fault = "has a . or .. segment, and patterns are relative to " \
+                    "the directory of the file they are written in"
     if fault is None and anchored and base is None:
         fault = ("is anchored, and the global ledger has no directory to "
                  "anchor it to; a pattern with a slash belongs in a project %s"
@@ -1057,10 +1072,10 @@ def record_form(rule, rel):
 
     Every pattern anchors to the directory of the file holding it, and the
     ledger is not always the directory you are standing in. An anchored one is
-    therefore rewritten to go on meaning the place it meant during the run: from
-    /proj/sub, with the ledger at /proj, `/build/` is recorded as `/sub/build/`.
-    An unanchored pattern says "at any depth" in either file, so it goes down
-    exactly as it was typed.
+    therefore rewritten to go on meaning the place it meant during the run:
+    from /proj/sub, with the ledger at /proj, `/build/` is recorded as
+    `/sub/build/`. An unanchored pattern says "at any depth" in either file,
+    so it goes down exactly as it was typed.
     """
     if not rule["anch"] or rel is None or rel == Path("."):
         return rule["pat"]
@@ -1178,8 +1193,8 @@ def git_groups(top, root, bad):
     for directory in reversed(chain):
         path = directory / ".gitignore"
         if path.is_file():
-            groups.append(rule_group(read_ignore_file(path, bad), directory, path,
-                                     "gitignore", bad))
+            groups.append(rule_group(read_ignore_file(path, bad), directory,
+                                     path, "gitignore", bad))
     return groups
 
 
@@ -1199,9 +1214,10 @@ def walk_tree(top, exts, ign, ignored):
         base = top.resolve()
     except OSError:
         base = Path(os.path.abspath(str(top)))
-    # Outside a work tree git applies no ignore rules at all, so neither do we;
-    # a stray .gitignore in a tarball is not policy anyone recorded. A walk that
-    # starts outside one can still descend into a repository of its own.
+    # Outside a work tree git applies no ignore rules at all, so neither do
+    # we; a stray .gitignore in a tarball is not policy anyone recorded. A
+    # walk that starts outside one can still descend into a repository of its
+    # own.
     repo = git_root(base) if ign["git"] else None
     # os.walk builds each root by joining, so a resolved absolute path can be
     # carried down the same way. Resolving per file would be slower, and
@@ -1217,8 +1233,9 @@ def walk_tree(top, exts, ign, ignored):
         if inside:
             local = here / ".gitignore"
             if local.is_file():
-                groups = groups + [rule_group(read_ignore_file(local, ign["bad"]), here,
-                                              local, "gitignore", ign["bad"])]
+                groups = groups + [
+                    rule_group(read_ignore_file(local, ign["bad"]), here,
+                               local, "gitignore", ign["bad"])]
                 inherited[root] = groups
         active = ign["head"] + groups + ign["tail"]
 
@@ -1301,7 +1318,8 @@ def collect(paths, exts, ign):
             print("error: not a regular file: %s" % raw, file=sys.stderr)
             raise SystemExit(2)
         else:
-            print("error: no such file or directory: %s" % raw, file=sys.stderr)
+            print("error: no such file or directory: %s" % raw,
+                  file=sys.stderr)
             raise SystemExit(2)
 
     # Two PATH arguments may overlap, and a path counted twice would inflate
@@ -1345,12 +1363,14 @@ def build_parser():
                     help="report only; do not add new entries to the config")
     ap.add_argument("--config", metavar="PATH", default=None,
                     help="use only this ledger, ignoring both normal layers "
-                         "(default: %s overridden per character by the nearest "
-                         "%s at or above the working directory)"
+                         "(default: %s overridden per character by the "
+                         "nearest %s at or above the working directory)"
                          % (global_config(), LOCAL_NAME))
     ap.add_argument("--ext", metavar="LIST", default="",
-                    help="restrict a directory walk by extension, e.g. .md,.toml")
-    ap.add_argument("--exclude", metavar="PATTERN", action="append", default=[],
+                    help="restrict a directory walk by extension, "
+                         "e.g. .md,.toml")
+    ap.add_argument("--exclude", metavar="PATTERN", action="append",
+                    default=[],
                     help="leave this out of a walk, in gitignore syntax; "
                          "repeatable, outranks every recorded pattern, and is "
                          "written to the ledger unless --no-append")
@@ -1378,10 +1398,10 @@ def main(argv=None):
     config, source, groups = merge_layers(layers)
 
     defaults = rule_group(DEFAULT_IGNORE, None, "built-in defaults", "default")
-    # A --exclude anchors to the working directory, and goes last so it outranks
-    # every recorded pattern. --no-ignore turns off what was recorded; a pattern
-    # given on the same command line is what is being asked for right now, so it
-    # survives.
+    # A --exclude anchors to the working directory, and goes last so it
+    # outranks every recorded pattern. --no-ignore turns off what was
+    # recorded; a pattern given on the same command line is what is being
+    # asked for right now, so it survives.
     cli = [rule_group(args.exclude, Path.cwd(), "--exclude", "cli",
                       absolute=True)] if args.exclude else []
     ign = {
@@ -1397,9 +1417,11 @@ def main(argv=None):
         if config:
             print("%-9s %-42s %-16s %s" % ("CODE", "NAME", "DECISION", "FROM"))
             for ch in sorted(config, key=ord):
+                layer = ("local" if source[ch].name == LOCAL_NAME
+                         else "global")
                 print("%-9s %-42s %-16s %s"
                       % (key_of(ch), name_of(ch)[:42], describe(config[ch]),
-                         "local" if source[ch].name == LOCAL_NAME else "global"))
+                         layer))
         else:
             print("no decisions recorded in %s" % config_path)
         print()
@@ -1409,8 +1431,8 @@ def main(argv=None):
                 print("%-9s %s" % (rule["src"], rule["pat"]))
         # Which .gitignore files apply depends on what is being walked, and
         # --list is given no path, so they cannot be listed here.
-        print("later patterns win; .gitignore is read during a walk and is not "
-              "listed here")
+        print("later patterns win; .gitignore is read during a walk and is "
+              "not listed here")
         return 0
 
     if not args.paths:
@@ -1455,9 +1477,9 @@ def main(argv=None):
                 outside = False
             if outside:
                 raise ConfigError(
-                    "--exclude would be recorded in %s, which is not above %s, "
-                    "so the pattern could never apply to that tree again; use "
-                    "--no-append" % (config_path, raw))
+                    "--exclude would be recorded in %s, which is not above "
+                    "%s, so the pattern could never apply to that tree "
+                    "again; use --no-append" % (config_path, raw))
 
     exts = tuple(e if e.startswith(".") else "." + e
                  for e in (x.strip() for x in args.ext.split(",")) if e)
@@ -1505,8 +1527,9 @@ def main(argv=None):
     if (unknown or to_record) and not args.no_append:
         created_ledger = not config_path.exists()
         if to_record:
-            # Before the characters, so a ledger this run creates opens with the
-            # patterns instead of burying them under the first character table.
+            # Before the characters, so a ledger this run creates opens with
+            # the patterns instead of burying them under the first character
+            # table.
             recorded, unrecorded = append_patterns(config_path, to_record)
         if unknown:
             appended = append_entries(config_path, unknown, counts)
@@ -1523,7 +1546,8 @@ def main(argv=None):
         current = None
         for path, lineno, col, ch, body, is_self in shown:
             if path != current:
-                print("%s%s" % (path, "   [SELF - not rewritten]" if is_self else ""))
+                print("%s%s" % (path, "   [SELF - not rewritten]"
+                                if is_self else ""))
                 current = path
             print("  line %4d, col %3d   %-8s %-30s %-14s %s"
                   % (lineno, col, key_of(ch), name_of(ch)[:30],
@@ -1602,14 +1626,16 @@ def main(argv=None):
 
     if args.fix and changed_files:
         print("  %s fixed in %s"
-              % (plural(changed_chars, "character"), plural(changed_files, "file")))
+              % (plural(changed_chars, "character"),
+                 plural(changed_files, "file")))
     for path, reason in failures:
-        print("  ERROR could not write %s: %s" % (path, reason), file=sys.stderr)
+        print("  ERROR could not write %s: %s" % (path, reason),
+              file=sys.stderr)
     if blocked:
-        # Printed even under -q: silently declining to apply a recorded decision
-        # is exactly the thing a caller must not miss.
-        print("  %s left in self-referencing files (%s); name the file directly "
-              "to rewrite it"
+        # Printed even under -q: silently declining to apply a recorded
+        # decision is exactly the thing a caller must not miss.
+        print("  %s left in self-referencing files (%s); name the file "
+              "directly to rewrite it"
               % (plural(len(blocked), "decided character"),
                  ", ".join(key_of(c) for c in blocked)))
     if created_ledger:
@@ -1619,15 +1645,15 @@ def main(argv=None):
               % (plural(len(recorded), "ignore pattern"), config_path))
         shown = set()
         for typed, form in zip(args.exclude, to_record):
-            # The rewrite an anchored pattern goes through is worth seeing, and
-            # worth seeing once however many times it was typed.
+            # The rewrite an anchored pattern goes through is worth seeing,
+            # and worth seeing once however many times it was typed.
             if form != typed and form in recorded and form not in shown:
                 shown.add(form)
                 print("    %s recorded as %s"
                       % (toml_string(typed), toml_string(form)))
     if unrecorded:
-        # Printed even under -q: a pattern that was applied but not written down
-        # is a difference between this run and the next one.
+        # Printed even under -q: a pattern that was applied but not written
+        # down is a difference between this run and the next one.
         print("  could not record %s in %s; add to [files] ignore by hand:"
               % (plural(len(unrecorded), "ignore pattern"), config_path))
         for pattern in unrecorded:
@@ -1663,8 +1689,9 @@ def main(argv=None):
 def cli(argv=None):
     """Console entry point: turns exceptions into the documented exit codes.
 
-    Both `python3 charck.py` and the installed `charck` command go through here,
-    so an installed copy reports a bad ledger as exit 2 rather than a traceback.
+    Both `python3 charck.py` and the installed `charck` command go through
+    here, so an installed copy reports a bad ledger as exit 2 rather than a
+    traceback.
     """
     try:
         return main(argv)

@@ -127,8 +127,8 @@ python3 -m py_compile charck.py        # syntax check
 ```
 
 `flake8` is the only development dependency, and `make lint` runs it with its
-defaults, so it reports `E501` on lines the file has always had. Read it, do not
-chase it clean. There is no formatter and no CI. The test suite is the gate.
+defaults, so `charck.py` wraps at 79 columns and is kept clean. There is no
+formatter and no CI. The test suite is the gate.
 
 `make install` goes through pipx, so the tool lands in its own virtualenv under
 `~/.local/pipx/venvs` with the command linked into `~/.local/bin`. Nothing is
