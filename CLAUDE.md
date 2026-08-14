@@ -25,7 +25,7 @@ charck.py              the entire tool, one module, ~1685 lines, stdlib only
 tests/test_charck.py   standalone regression suite, ~1025 lines, 196 cases (190 without make)
 pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
 Makefile               help (default), test, install, uninstall, clean; GNU make 3.81 compatible
-README.md              user-facing docs, written in the author's voice (see Voice below)
+README.md              user-facing docs
 .gitignore             ignores .charck.toml, .*.charck-tmp, and the usual Python noise
 ```
 
@@ -140,48 +140,6 @@ cond, extra)` and counts passes and failures. Sections are lettered (`A.`, `B.`,
 ...) and named after the failure mode they pin down. Add new cases in that style,
 and always assert on real observed bytes rather than on the report text alone.
 
-## Voice
-
-Two guides live outside this repo, one per register. Read the relevant one before
-writing; neither is optional, and they do not substitute for each other.
-
-### Long-form and documentation: `../style/VOICE.md`
-
-Applies to `README.md`, this file, and any prose written for a reader. The rules
-that matter most:
-
-- **Never emit an em-dash.** Use a spaced hyphen ` - `, a comma or a colon.
-- Alternate long explanatory sentences with short blunt ones.
-- Concrete over abstract. Numbers, codepoints, versions, real failure modes.
-- Never oversell, least of all the tool itself.
-- Present every solution with its cost or limit.
-- Mostly `we` with some `I`, and `you` when addressing the reader directly.
-- Avoid `delve`, `robust`, `crucial`, `seamless`, `leverage`, `utilize` and the
-  rest of the never-write list in that guide.
-
-### Commit messages: `../style/VOICE-COMMITS.md`
-
-Applies to commit messages, cover letters and pull request descriptions. It is
-self-contained, so read it instead of `VOICE.md`, not after it. In short:
-
-- Subject is `subsystem: summary`, imperative, no full stop. Median 51
-  characters, never past 65. Name the function, flag or test.
-- The good subjects are **verb + object + the condition under which it matters**.
-  If a subject stops after the object, the change was probably not understood.
-- Match the subsystem prefix to what `git log` already uses in that area. This
-  repo has no convention yet, so lowercase, with areas along the lines of
-  `scan:`, `config:`, `fix:`, `walk:`, `tests:`, `docs:`.
-- **Write a body**, wrapped at 72 columns, blank line after the subject. Only
-  mechanical changes are exempt.
-- **Say what is wrong before what you did.** Open on the current behaviour in
-  present tense, hinge on `However`, then the fix as its own paragraph, often
-  literally `Fix this by ...`.
-- `we` is the voice in a commit body. `I` is rare there and normal in a cover
-  letter.
-- Never write `This patch`. No bullet-point bodies. No em-dash. No selling.
-- Show the evidence when there is any: the failing test, the reproducer, the
-  hexdump. Not otherwise.
-
 ### Comments
 
 Code comments explain *why*, not *what*, and several existing ones record the bug
@@ -224,9 +182,6 @@ Follow these steps in order for any non-trivial change. Do not skip ahead.
    - any outstanding work, and any decision that has to be made on the human end
 
 ### Committing
-
-Committing is a separate, explicit request. Do not commit or push unless asked.
-When asked, write the message to `../style/VOICE-COMMITS.md`.
 
 **Never add a file to the repository without permission.** The one exception is
 the obvious case: a file created in order to fulfil a request is part of that
