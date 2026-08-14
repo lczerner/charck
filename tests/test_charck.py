@@ -416,10 +416,30 @@ else:
     # The point of installing through pipx is that it stays under $HOME. Recipe
     # lines only: the header comment says "No sudo", and matching prose here
     # would fail on the very sentence that promises the property.
-    recipes = "\n".join(l for l in mkbody.splitlines() if l.startswith("\t"))
-    check("no recipe escalates or installs system-wide",
-          "sudo" not in recipes and "pip install" not in recipes,
-          [l for l in recipes.splitlines() if "sudo" in l or "pip install" in l])
+    # A pip named by its .venv/bin/ path writes into the virtualenv the venv
+    # target just built. A bare `pip install` lands wherever PATH points, and
+    # that is what this pins down.
+    VENV_PIP = (".venv/bin/pip install", ".venv/bin/python -m pip install")
+    ESCAPES = ("--target", "--prefix", "--root")
+
+    def system_wide(line):
+        if "sudo" in line:
+            return True
+        if "pip install" not in line:
+            return False
+        # Anchored to the start of the command, and one pip per line: a
+        # whitelist matching anywhere would exempt whatever else the line
+        # runs, which a review got past with a trailing `# prefer
+        # .venv/bin/pip install here` comment. --target and friends reach out
+        # of the virtualenv even from the right pip.
+        command = line.lstrip("\t").lstrip("@-+ ")
+        return (not command.startswith(VENV_PIP)
+                or line.count("pip install") != 1
+                or any(opt in line for opt in ESCAPES))
+
+    recipes = [l for l in mkbody.splitlines() if l.startswith("\t")]
+    loose = [l for l in recipes if system_wide(l)]
+    check("no recipe escalates or installs system-wide", not loose, loose)
 
 print("\n== U. the walk obeys the ledger's ignore patterns ==")
 # --no-gitignore throughout: this section is about the ledger, and a .gitignore

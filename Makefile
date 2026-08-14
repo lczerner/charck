@@ -13,9 +13,9 @@ PIPX   ?= pipx
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test install uninstall clean venv
+.PHONY: all help test lint install uninstall clean venv
 
-all: venv
+all: venv ## Same as venv
 
 help: ## Show this help
 	@echo "charck - make <target>"
