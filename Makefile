@@ -15,6 +15,12 @@ PIPX   ?= pipx
 
 .PHONY: all help test lint install uninstall clean venv
 
+# `python3 -m venv` creates .venv/bin/activate, which is also the stamp the
+# venv rule is written against. A pip step that then fails would leave the
+# stamp behind, newer than pyproject.toml, and every later `make test` would
+# run a pytest that was never installed.
+.DELETE_ON_ERROR:
+
 all: venv ## Same as venv
 
 help: ## Show this help
@@ -40,11 +46,11 @@ venv: .venv/bin/activate ## Build virtualenv in .venv from the 'dev' dependencie
 	@echo
 	@echo "The 'charck' command is now available in .venv/bin/"
 
-test: ## Run the regression suite (exits non-zero on failure)
-	$(PYTHON) tests/test_charck.py
+test: venv ## Run the regression suite (exits non-zero on failure)
+	.venv/bin/pytest
 
-lint: venv ## Run the lint checker on the script (flake8)
-	.venv/bin/flake8 charck.py
+lint: venv ## Run the lint checker on the script and tests (flake8)
+	.venv/bin/flake8 charck.py tests/
 
 install: ## Install the charck command into ~/.local/bin, via pipx
 	$(PIPX) install --force .
@@ -59,5 +65,5 @@ uninstall: ## Remove the pipx installation
 # leaves behind, which write_atomic names .<file>.<random>.charck-tmp.
 clean: ## Remove build artifacts, caches and stray --fix temp files
 	rm -rf build dist .eggs *.egg-info
-	rm -rf __pycache__ tests/__pycache__
+	rm -rf __pycache__ tests/__pycache__ .pytest_cache
 	rm -f .*.charck-tmp tests/.*.charck-tmp

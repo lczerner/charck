@@ -38,8 +38,11 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
+# Development only. The tool itself still needs nothing outside the standard
+# library; these are what `make lint` and `make test` run.
 dev = [
     "flake8>=7.1",
+    "pytest>=8.0",
 ]
 
 [project.scripts]
@@ -52,3 +55,12 @@ Issues = "https://github.com/lczerner/charck/issues"
 [tool.setuptools]
 # Single-module project: charck.py at the repo root, no package directory.
 py-modules = ["charck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+# The test modules import their shared fixtures with `from conftest import`,
+# which the default import mode allows and --import-mode=importlib does not.
+pythonpath = ["tests"]
+# A test that starts passing has to say so, not go quietly green.
+xfail_strict = true
