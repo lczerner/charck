@@ -122,8 +122,6 @@ even if the test suite still passes, so add a test if you find a gap.
 make test                              # or: python3 tests/test_charck.py
 make help                              # the target list, and the default goal
 python3 -m py_compile charck.py        # syntax check
-python3 charck.py --no-append README.md   # dogfood: must report only U+FB01 and U+FF21
-pipx run build --wheel                 # packaging check, without installing `build`
 ```
 
 There is no linter, formatter or CI configured. The test suite is the gate.
