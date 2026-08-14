@@ -13,7 +13,9 @@ PIPX   ?= pipx
 
 .DEFAULT_GOAL := help
 
-.PHONY: help test install uninstall clean
+.PHONY: help test install uninstall clean venv
+
+all: venv
 
 help: ## Show this help
 	@echo "charck - make <target>"
@@ -25,8 +27,24 @@ help: ## Show this help
 	@echo "Overridable: PYTHON=$(PYTHON) PIPX=$(PIPX)"
 	@echo "Installs are user-level only. Nothing is written outside \$$HOME."
 
+venv: .venv/bin/activate ## Build virtualenv in .venv from the 'dev' dependencies
+
+.venv/bin/activate: pyproject.toml
+	$(PYTHON) -m venv .venv/
+	.venv/bin/pip install --upgrade pip
+	.venv/bin/pip install -e ".[dev]"
+	touch .venv/bin/activate
+	@echo
+	@echo "To activate the virtual environment, run:"
+	@echo "    source .venv/bin/activate"
+	@echo
+	@echo "The 'charck' command is now available in .venv/bin/"
+
 test: ## Run the regression suite (exits non-zero on failure)
 	$(PYTHON) tests/test_charck.py
+
+lint: venv ## Run the lint checker on the script (flake8)
+	.venv/bin/flake8 charck.py
 
 install: ## Install the charck command into ~/.local/bin, via pipx
 	$(PIPX) install --force .

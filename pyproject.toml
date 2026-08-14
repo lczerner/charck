@@ -37,6 +37,11 @@ classifiers = [
 # requires-python above.
 dependencies = []
 
+[project.optional-dependencies]
+dev = [
+    "flake8>=7.1",
+]
+
 [project.scripts]
 charck = "charck:cli"
 

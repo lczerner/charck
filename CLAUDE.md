@@ -120,11 +120,15 @@ even if the test suite still passes, so add a test if you find a gap.
 
 ```sh
 make test                              # or: python3 tests/test_charck.py
+make venv                              # dev virtualenv in .venv, from the dev extra
+make lint                              # flake8 on charck.py, needs the .venv
 make help                              # the target list, and the default goal
 python3 -m py_compile charck.py        # syntax check
 ```
 
-There is no linter, formatter or CI configured. The test suite is the gate.
+`flake8` is the only development dependency, and `make lint` runs it with its
+defaults, so it reports `E501` on lines the file has always had. Read it, do not
+chase it clean. There is no formatter and no CI. The test suite is the gate.
 
 `make install` goes through pipx, so the tool lands in its own virtualenv under
 `~/.local/pipx/venvs` with the command linked into `~/.local/bin`. Nothing is

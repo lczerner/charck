@@ -319,6 +319,18 @@ cases check the `Makefile` and skip themselves on a checkout that has no `make`,
 so you will see 190 there. Two more skip themselves when `TMPDIR` is inside a git
 repository, since that repository would then have a say in the result.
 
+## Lint
+
+```sh
+make venv
+make lint
+```
+
+`make venv` builds a virtualenv in `.venv` from the `dev` extra in
+`pyproject.toml`, and `make lint` runs `flake8` from it over `charck.py`. That is
+the only development dependency there is; the tool itself still needs nothing
+outside the standard library.
+
 ## Disclaimer
 
 I wrote this for my own files and my own habits. It does what I need it to do,
