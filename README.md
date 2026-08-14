@@ -320,9 +320,10 @@ and runs the suite from it, so the first run needs `pip` and the network;
 `.venv/bin/pytest tests/test_ignore.py` afterwards runs a single module.
 
 A few cases skip themselves rather than lie: the `Makefile` ones on a checkout
-with no `make`, two `.gitignore` ones when `TMPDIR` is inside a git repository
-that would otherwise have a say in the result, and the permission ones when you
-are root.
+with no `make`, and the ones reading a file for its licence header when that
+file is not there at all, which is how the sdist ships. Two `.gitignore` cases
+skip when `TMPDIR` is inside a git repository that would otherwise have a say in
+the result, and the permission ones skip when you are root.
 
 ## Lint
 
@@ -335,6 +336,14 @@ make lint
 `pyproject.toml`, and `make lint` runs `flake8` from it over `charck.py` and
 `tests/`. `flake8` and `pytest` are the only development dependencies there are;
 the tool itself still needs nothing outside the standard library.
+
+## License
+
+MIT. The full text is in `LICENSE`, and `charck.py`, the test suite, the
+`Makefile` and `pyproject.toml` each carry an `SPDX-License-Identifier: MIT`
+line, so a file that gets copied out of the tree still says what it is.
+
+Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 
 ## Disclaimer
 

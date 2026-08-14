@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """charck - check text files for non-ASCII characters, and repair them.
 
 Reports every character that is not printable ASCII, with codepoint, name,

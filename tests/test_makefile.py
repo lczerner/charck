@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """The Makefile lists what it has, and installs nothing system-wide.
 
 Section T of the original suite. The only recipe really run here is `help`,

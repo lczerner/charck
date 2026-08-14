@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """What the report says, and what it refuses to say.
 
 Sections H, I, M, O and R of the original suite: binary detection, files

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """The ledger: what it protects, what it refuses, how it grows.
 
 Sections E, F, J, K, L and Q of the original suite: the live ledger and the

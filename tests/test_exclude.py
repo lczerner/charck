@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """--exclude: what a first run leaves out, and what it writes down.
 
 Section Z of the original suite. The flag exists for the run before there is

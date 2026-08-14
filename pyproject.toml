@@ -1,5 +1,10 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
+
 [build-system]
-requires = ["setuptools>=61"]
+# setuptools 77 is where PEP 639 landed: an SPDX string in `license` and a
+# `license-files` list. Both are used below, so an older one cannot build this.
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,6 +14,7 @@ description = "Check text files for non-ASCII characters, and repair them"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Lukáš Czerner", email = "lukas@czerner.cz" }]
 keywords = [
     "unicode",

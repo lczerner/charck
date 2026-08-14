@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """What --fix is allowed to change, and what it must leave alone.
 
 Sections A, B, C, D, G and N of the original suite: `to` is data and not a

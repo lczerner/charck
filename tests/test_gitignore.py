@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """Somebody else's ignore file, read the way git reads it.
 
 Sections V and Y of the original suite: a .gitignore applies only inside a

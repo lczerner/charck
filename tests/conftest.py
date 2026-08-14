@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """Fixtures for the charck regression suite.
 
 Every test drives charck.py as a subprocess, the way a user does, and

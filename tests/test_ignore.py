@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """Which files a walk reaches, and which the ledger keeps it away from.
 
 Sections U, U2, W and X of the original suite: gitignore-syntax patterns in

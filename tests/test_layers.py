@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """Two ledgers, and which one decides.
 
 Section S of the original suite: a local ledger overrides the global one per

@@ -23,9 +23,10 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 ```
 charck.py              the entire tool, one module, ~1710 lines, stdlib only
 tests/                 pytest regression suite, conftest.py plus one module per area
-pyproject.toml         setuptools, py-modules = ["charck"], console script charck = charck:cli
+pyproject.toml         setuptools >= 77, py-modules = ["charck"], console script charck = charck:cli
 Makefile               help (default), venv, test, lint, install, uninstall, clean; GNU make 3.81 compatible
 README.md              user-facing docs
+LICENSE                MIT, and the only place the full text lives
 .gitignore             ignores .charck.toml, .*.charck-tmp, and the usual Python noise
 ```
 
@@ -115,6 +116,13 @@ even if the test suite still passes, so add a test if you find a gap.
   `.gitignore`. One odd line in a repository's own file must not stop the run.
 - **Exit codes:** `0` clean or fully applied, `1` something to look at or apply,
   `2` operational error. Never let an exception escape as a traceback.
+- **Every source file says what it is licensed under.** `SPDX-License-Identifier:
+  MIT` and the copyright line, in the first few lines, under the shebang where
+  there is one. `charck.py` gets copied out of the tree on purpose (the README
+  suggests it), so a header further down, or none at all, travels as an unlicensed
+  file. `tests/test_license.py` checks the headers, `LICENSE` and
+  `pyproject.toml` still agree. It globs `tests/`, so a module added there is
+  covered on its own; a new source file outside it goes in that list.
 
 ## Commands
 

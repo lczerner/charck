@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# Copyright 2026, Lukáš Czerner <lukas@czerner.cz>
 """The whole loop, on one file that has one of everything.
 
 Section P of the original suite: a bootstrap run writes down every character
