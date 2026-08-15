@@ -67,6 +67,6 @@ uninstall: ## Remove the pipx installation
 # clean out unrelated checkouts. The temp files are what an interrupted --fix
 # leaves behind, which write_atomic names .<file>.<random>.charck-tmp.
 clean: ## Remove build artifacts, caches and stray --fix temp files
-	rm -rf build dist .eggs *.egg-info
+	rm -rf build dist .eggs *.egg-info .venv/
 	rm -rf __pycache__ tests/__pycache__ .pytest_cache
 	rm -f .*.charck-tmp tests/.*.charck-tmp
