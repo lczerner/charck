@@ -49,10 +49,19 @@ def isolated_home(tmp_path_factory, monkeypatch):
     A sibling of tmp_path rather than a directory inside it, so a test that
     walks its own tmp_path never has to reckon with a home in the middle of
     the tree it is scanning.
+
+    The locale variables go the same way. charck takes the letters it exempts
+    from them, so leaving them set would make the suite say something
+    different on every developer's machine. Unset, a run falls back to the
+    Latin script, which is what charck exempted before it knew about
+    languages; a test that cares about one passes --lang or sets a variable
+    itself.
     """
     home = tmp_path_factory.mktemp("home")
     monkeypatch.setenv("HOME", str(home))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
+    for var in ("LC_ALL", "LC_CTYPE", "LANG"):
+        monkeypatch.delenv(var, raising=False)
     return home
 
 

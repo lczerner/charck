@@ -21,7 +21,7 @@ meant to be usable as a build gate (exit `1` when there is something to act on).
 ## Layout
 
 ```
-charck.py              the entire tool, one module, ~1710 lines, stdlib only
+charck.py              the entire tool, one module, ~2200 lines, stdlib only
 tests/                 pytest regression suite, conftest.py plus one module per area
 pyproject.toml         setuptools >= 77, py-modules = ["charck"], console script charck = charck:cli
 Makefile               help (default), venv, test, lint, install, uninstall, clean; GNU make 3.81 compatible
@@ -38,13 +38,14 @@ Section comments (`# ---- name ----`) mark the boundaries. In file order:
 |---|---|---|
 | Config discovery | `xdg_config_home`, `global_config`, `find_local_config`, `resolve_layers`, `merge_layers` | Locate and layer the two ledgers |
 | Module constants | `LOCAL_NAME`, `SELF_FILES`, `ACTIONS`, `KEY_RE`, `TABLE_RE`, `CONTEXT`, `HEADER` | |
-| Classification | `is_exempt`, `key_of`, `name_of`, `suggest` | What is reported, and what the ledger suggests |
-| Config | `ConfigError`, `load_config`, `load_patterns`, `toml_string`, `render_entry`, `array_end`, `splice`, `ignore_insert`, `open_ledger`, `read_ledger`, `append_patterns`, `append_entries` | Read, validate, append to and record a pattern in a ledger |
+| Classification | `is_ascii_exempt`, `key_of`, `name_of`, `suggest` | The floor, and what the ledger suggests |
+| Locale | `ALPHABETS`, `SCRIPTS`, `SCRIPT_LANGS`, `CJK_PUNCT`, `env_locale`, `locale_keys`, `spell_alphabet`, `expand`, `lang_exempt`, `spec_exempt`, `resolve_locale`, `locale_record`, `is_exempt` | Which letters a language writes with, and where that answer came from |
+| Config | `ConfigError`, `load_config`, `load_patterns`, `load_locale`, `toml_string`, `render_entry`, `array_end`, `splice`, `ignore_insert`, `open_ledger`, `read_ledger`, `append_patterns`, `render_locale`, `append_locale`, `append_entries` | Read, validate, append to and record a pattern in a ledger |
 | Scanning | `read_source`, `iter_lines`, `line_body`, `scan_text`, `safe_context`, `render` | Find findings and display them |
 | Rewriting | `build_pattern`, `apply_decisions`, `write_atomic` | Apply decisions and write files |
 | Ignoring | `DEFAULT_IGNORE`, `ALWAYS_PRUNE`, `POSIX_CLASS`, `class_regex`, `pattern_regex`, `make_rule`, `rule_group`, `record_form`, `ignored_by`, `read_ignore_file`, `inside_git`, `git_root`, `git_groups` | gitignore-syntax patterns, and where they come from |
 | Walking | `walk_tree`, `collect` | Expand paths into targets |
-| CLI | `describe`, `build_parser`, `main`, `cli` | Argument handling, report, exit codes |
+| CLI | `describe_exempt`, `describe`, `build_parser`, `main`, `cli` | Argument handling, report, exit codes |
 
 `main` returns an exit code. `cli` wraps it and converts exceptions into codes, and
 both `python3 charck.py` and the installed `charck` command go through `cli`. Put
@@ -57,8 +58,61 @@ even if the test suite still passes, so add a test if you find a gap.
 
 - **The report and the rewrite must agree.** `--fix` may only change characters
   the report showed. The live example is CRLF: `scan_text` skips the `\r` of a
-  `\r\n` pair, so `build_pattern` matches `\r(?!\n)`. A ledger entry for an exempt
+  `\r\n` pair, so `build_pattern` matches `\r(?!\n)`. A ledger entry on a floor
   character is a fatal config error for the same reason.
+- **The floor is absolute, and everything above it is the locale's.**
+  `is_ascii_exempt` (printable ASCII, tab, LF) is never reported by any run, and
+  a `delete` or `replace` on one is exit `2`. Above it, the exempt set depends on
+  a language, so it must not be checked at load: the `[locale]` table lives in
+  the very file being loaded, and a ledger that parsed on one machine would be
+  fatal on another. Instead **a `delete` or `replace` entry un-exempts its
+  character**, which brings it back into the report and keeps report and rewrite
+  in step. Only those two, and this is load-bearing: the tool appends an
+  undecided entry for every character it has ever seen, so an entry carries no
+  intent until an action is filled in. When undecided entries un-exempted, a
+  letter could never be silenced by adding it to `[locale] exempt`, and the
+  report printed that advice having just watched it fail. `decided` in `main`
+  drops floor characters too, so an `ignore` on `U+0041` cannot start reporting
+  every capital A.
+- **Recording the locale rides along with a write, and never causes one.** A
+  clean tree wrote nothing before this feature and must write nothing now:
+  creating a ledger for a run with no findings is presumptuous, and on a
+  read-only checkout it turned exit `0` into exit `2`.
+- **A ligature is a paste artifact only if Unicode says so.** `"LIGATURE" in
+  name` is not the test; a compatibility decomposition is. `ﬁ` has one, and so
+  does Armenian `և`, which a normaliser would expand. `œ` and the Yiddish `װ ױ
+  ײ` have none and are ordinary letters, and matching on the name flagged every
+  Yiddish text.
+- **A blank character is never handed back by a script rule.** `NEVER_EXEMPT`
+  holds the Hangul and Khmer fillers, which are category `L` and render as
+  nothing. They carry their script's name, so the prefix match would exempt
+  them, and they are the README's own example of why this tool reports by
+  exemption rather than by category.
+- **A locale replaces the exempt set, never adds to it.** Russian exempts
+  Cyrillic and not Latin as well. A local `[locale]` replaces the global table
+  wholesale, unlike `[chars]`, which layers per character: the set is the unit
+  here, and merging would leave a project unable to be stricter than the global
+  ledger.
+- **A variable naming no language is skipped, not taken as the answer.** CPython
+  coerces the C locale at startup and puts `LC_CTYPE=C.UTF-8` into its own
+  environment (PEP 538), and it does so whenever the locale named is not one the
+  system has generated. Read in strict POSIX precedence that coerced value
+  outranks `$LANG`, and a minimal container would quietly scan Czech prose as
+  though no language had been named. So `env_locale` skips `C` and `POSIX` and
+  keeps looking, and `--no-lang` is the way to mean ASCII-only.
+- **An alphabet is recorded as its letters, a script as its name.** The tables
+  compiled into the tool are a seed, not an authority: `[locale] exempt` holds
+  the characters themselves, so a disagreement is one edit to a visible string
+  rather than an argument with `ALPHABETS`. Only a language that cannot be
+  listed at all, Han being 97668 characters, is recorded as `lang`.
+- **Script membership is spelled by Unicode name prefix**, because the stdlib
+  exposes no Script property. It has to cover `L` and `M` both: Arabic fathas
+  and Devanagari vowel signs are `Mn`/`Mc`, and a script exempted without them
+  flags every vowelled word. `LIGATURE` is excluded everywhere, and fullwidth
+  forms never match because they are named `FULLWIDTH`.
+- **The suite must be locale-hermetic.** `conftest.py` unsets `LC_ALL`,
+  `LC_CTYPE` and `LANG` alongside `HOME`, or every developer's machine reports
+  something different. A test that cares about a language sets one itself.
 - **`to` is data, never a regex replacement template.** It goes through a `lambda`
   in `apply_decisions`. A literal backslash in `to` must survive verbatim.
 - **Rewriting is a single left-to-right pass.** Replacement output is never
