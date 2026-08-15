@@ -4,10 +4,36 @@
 """charck - check text files for non-ASCII characters, and repair them.
 
 Reports every character that is not printable ASCII, with codepoint, name,
-count and exact position. The only exemption is Latin letters with diacritics
-(a e i c r s z ...), so ordinary Latin-script prose in any language is not
-flagged on every run; ligatures and fullwidth forms are still reported, being
-paste artifacts rather than letters.
+count and exact position. Exempt from that are the letters your language
+writes with, so ordinary prose is not flagged on every run; ligatures and
+fullwidth forms are still reported, being paste artifacts rather than letters.
+
+Which letters those are comes from the locale: `cs_CZ.UTF-8` exempts the
+fifteen letters Czech uses, and no others, so a Polish `l` with a stroke in
+Czech prose is still a finding. Languages an alphabet cannot describe get
+their whole script instead: Japanese is kana and 97668 Han ideographs, which
+is not a list anyone can write down. The order of preference is
+
+  --lang / --no-lang             this run only
+  [locale] in the ledger         local layer replaces the global one
+  $LC_ALL, $LC_CTYPE, $LANG      recorded to the ledger on first use
+  the Latin script               what charck exempted before it asked
+
+A locale read from the environment is written into the ledger as the run
+goes, so later runs no longer depend on a variable. An alphabet is recorded as
+the letters themselves:
+
+  [locale]
+  exempt = "áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ"
+
+which is also how you correct it. Add the letters of a foreign name you would
+rather not be told about again, and the tool's own table stops mattering.
+`lang = "none"` exempts nothing beyond ASCII, and so does --no-lang.
+
+A character you have decided to delete or replace is reported whatever the
+locale says, so that --fix never changes bytes the report did not show. An
+undecided entry does not do that: the tool writes one for every character it
+has ever seen, so an entry carries no intent until you fill in an action.
 
 What to do about each character is recorded in a ledger. Detection appends
 newly-seen characters there as undecided; you fill in delete / replace /
@@ -138,21 +164,28 @@ def resolve_layers(explicit=None):
 def merge_layers(layers):
     """Later layers override earlier ones per character, not wholesale.
 
-    Returns (config, source, groups): source[ch] is the layer that decided it,
-    and groups are the layers' ignore rules in the same order, so a local `!`
-    pattern has the last word just as a local decision does.
+    Returns (config, source, groups, locale): source[ch] is the layer that
+    decided it, and groups are the layers' ignore rules in the same order, so
+    a local `!` pattern has the last word just as a local decision does.
+
+    [locale] is the one thing that does not layer per item. A local table
+    replaces the global one entirely, because the set is the unit here: a
+    project declaring a language means that language, and merging would make
+    it impossible to be stricter than the global ledger.
     """
-    config, source, groups = {}, {}, []
+    config, source, groups, locale = {}, {}, [], None
     for path, base in layers:
-        chars, patterns = load_config(path, base)
+        chars, patterns, table = load_config(path, base)
         for ch, entry in chars.items():
             config[ch] = entry
             source[ch] = path
+        if table is not None:
+            locale = dict(table, path=path)
         if patterns:
             label = "global" if base is None else (
                 "local" if path.name == LOCAL_NAME else "config")
             groups.append(rule_group(patterns, base, path, label))
-    return config, source, groups
+    return config, source, groups, locale
 
 
 # This script and the ledger it is reading describe the characters we hunt, so
@@ -164,6 +197,10 @@ SELF_FILES = {SCRIPT.name}
 ACTIONS = ("", "delete", "replace", "ignore")
 KEY_RE = re.compile(r"^U\+[0-9A-F]{4,6}$")
 TABLE_RE = re.compile(r'^\[chars\."(U\+[0-9A-Fa-f]{4,6})"\]', re.M)
+# Both spellings a [locale] table can take, so a second one is never appended
+# beside a hand-written dotted key. A duplicate would be a TOML error, and the
+# next run would exit 2 on a ledger this one wrote.
+LOCALE_RE = re.compile(r"^[ \t]*(\[locale\]|locale[ \t]*\.)", re.M)
 CONTEXT = 40
 
 HEADER = """\
@@ -180,6 +217,16 @@ HEADER = """\
 # `collapse = true` on a replace also eats spaces/tabs either side of the
 # character, so "a - b" does not become "a  -  b". Indentation at the start
 # of a line is never eaten.
+#
+# The letters your language writes with go in a [locale] table, and are never
+# reported. They are recorded from $LANG on a first run, and are yours to
+# edit; add a letter and it stops being a finding.
+#
+#   [locale]
+#   exempt = "áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ"
+#
+# A character you have decided to delete or replace above is reported whatever
+# [locale] says, so that --fix never changes what the report did not show.
 #
 # Paths a walk should leave alone go in a [files] table, in gitignore syntax:
 #
@@ -201,18 +248,16 @@ def plural(n, word, suffix="s"):
 # classification
 # --------------------------------------------------------------------------
 
-def is_exempt(ch):
-    """True for characters that are never reported: printable ASCII, tab,
-    newline, and Latin letters including every diacritic."""
-    if ch == "\n" or ch == "\t":
-        return True
-    if "\x20" <= ch <= "\x7e":
-        return True
-    if not unicodedata.category(ch).startswith("L"):
-        return False
-    name = unicodedata.name(ch, "")
-    # Ligatures are Latin-named but are paste artifacts, so they stay reported.
-    return name.startswith("LATIN") and "LIGATURE" not in name
+def is_ascii_exempt(ch):
+    """The floor: printable ASCII, tab and newline, never reported whatever
+    the locale says.
+
+    A ledger entry acting on one of these is a fatal config error, because the
+    report could never have shown it. Everything above this floor is the
+    locale's business, and a ledger entry there brings the character back into
+    the report rather than being refused.
+    """
+    return ch == "\n" or ch == "\t" or "\x20" <= ch <= "\x7e"
 
 
 def key_of(ch):
@@ -297,6 +342,366 @@ def suggest(ch):
 
 
 # --------------------------------------------------------------------------
+# locale
+# --------------------------------------------------------------------------
+
+# The letters a language actually uses, beyond ASCII. Lower case only; the
+# upper case half is derived. Being exact is the point: a Czech ledger that
+# exempted the whole Latin script would accept a Polish `ł` and a German `ß`
+# in Czech prose, which are precisely the pastes worth seeing.
+#
+# A language whose letters cannot be written down goes in SCRIPT_LANGS below,
+# not here. So does one where a letter list would be a lie: Vietnamese has 134
+# precomposed forms, and a hand-typed list that missed three would be worse
+# than the script rule it falls back to.
+ALPHABETS = {
+    "af": "áèéêëíîïôóúû",
+    "ca": "àçéèíïóòúü·",
+    "cs": "áčďéěíňóřšťúůýž",
+    "da": "æøå",
+    "de": "äöüß",
+    # The inverted marks open a question and an exclamation in Spanish, and
+    # are as obligatory as any letter. Punctuation earns a place here where a
+    # language cannot be written without it, as the Catalan middle dot does.
+    "es": "áéíñóúü¿¡",
+    "et": "äöõüšž",
+    # Written in plain ASCII, and saying so is the point: an accented letter
+    # in English prose is a paste worth seeing, not an everyday letter.
+    "en": "",
+    "eu": "ñ",
+    "fi": "äöåšž",
+    "fo": "áðíóúýæø",
+    "fr": "àâæçéèêëîïôùûüÿœ",
+    "ga": "áéíóú",
+    "gl": "áéíóúüñ",
+    "hr": "čćđšž",
+    "hu": "áéíóöőúüű",
+    "id": "",
+    "is": "áðéíóúýþæö",
+    "it": "àèéìíîòóùú",
+    "lt": "ąčęėįšųūž",
+    "lv": "āčēģīķļņšūž",
+    "ms": "",
+    "nb": "æøå",
+    "nl": "áàäéèëíìïóòöúùü",
+    "nn": "æøå",
+    "no": "æøå",
+    "pl": "ąćęłńóśźż",
+    "pt": "àáâãçéêíóôõú",
+    "ro": "ăâîșțşţ",
+    "sk": "áäčďéíĺľňóôŕšťúýž",
+    "sl": "čšžđ",
+    "sv": "åäö",
+    "sw": "",
+    # `İ` by hand: Python's casing is not locale-aware, so expanding `i` here
+    # would give the ASCII `I` and never the dotted capital Turkish uses.
+    "az": "çəğıöşüİ",
+    "tr": "çğıöşüİ",
+    # Cyrillic. Serbian and Azerbaijani are written in two scripts, and the
+    # @latin modifier on a locale says which, so both spellings are keys.
+    # `ё` is obligatory in Belarusian, unlike Russian, where it is optional.
+    "be": "абвгдеёжзійклмнопрстуўфхцчшыьэюя",
+    "bg": "абвгдежзийклмнопрстуфхцчшщъьюя",
+    "kk": "абвгғдеёжзийкқлмнңоөпрстуұүфхһцчшщъыіьэюя",
+    "ky": "абвгдеёжзийклмнңоөпрстуүфхцчшщъыьэюя",
+    "mk": "абвгдѓежзѕијклљмнњопрстќуфхцчџш",
+    "mn": "абвгдеёжзийклмноөпрстуүфхцчшщъыьэюя",
+    "ru": "абвгдеёжзийклмнопрстуфхцчшщъыьэюя",
+    "sr": "абвгдђежзијклљмнњопрстћуфхцчџш",
+    "sr@latin": "čćđšž",
+    "uk": "абвгґдеєжзиіїйклмнопрстуфхцчшщьюя",
+    # Greek, with the accented and dialytika forms ordinary prose carries.
+    "el": "αβγδεζηθικλμνξοπρστυφχψωςάέήίόύώϊϋΐΰ",
+}
+
+# A script is spelled by the prefix of its characters' Unicode names, which is
+# the only handle the stdlib gives us: unicodedata exposes no Script property.
+SCRIPTS = {
+    "arabic": ("ARABIC",),
+    "armenian": ("ARMENIAN",),
+    "bengali": ("BENGALI",),
+    "cyrillic": ("CYRILLIC",),
+    "devanagari": ("DEVANAGARI",),
+    "ethiopic": ("ETHIOPIC",),
+    "georgian": ("GEORGIAN",),
+    "greek": ("GREEK",),
+    "gujarati": ("GUJARATI",),
+    "gurmukhi": ("GURMUKHI",),
+    "han": ("CJK",),
+    "hangul": ("HANGUL",),
+    "hebrew": ("HEBREW",),
+    "kana": ("HIRAGANA", "KATAKANA"),
+    "kannada": ("KANNADA",),
+    "khmer": ("KHMER",),
+    "lao": ("LAO",),
+    "latin": ("LATIN",),
+    "malayalam": ("MALAYALAM",),
+    "myanmar": ("MYANMAR",),
+    "sinhala": ("SINHALA",),
+    "tamil": ("TAMIL",),
+    "telugu": ("TELUGU",),
+    "thai": ("THAI",),
+}
+
+# Languages an alphabet cannot describe: Han is 97668 characters and Hangul
+# 11172, and the rest are written with combining marks a letter list would
+# omit, so an Arabic or Devanagari alphabet would flag every vowelled word.
+SCRIPT_LANGS = {
+    "am": ("ethiopic",), "ar": ("arabic",), "bn": ("bengali",),
+    "fa": ("arabic",), "gu": ("gujarati",), "he": ("hebrew",),
+    "hi": ("devanagari",), "hy": ("armenian",), "ja": ("kana", "han"),
+    "ka": ("georgian",), "km": ("khmer",), "kn": ("kannada",),
+    "ko": ("hangul", "han"), "lo": ("lao",), "ml": ("malayalam",),
+    "mr": ("devanagari",), "my": ("myanmar",), "ne": ("devanagari",),
+    "pa": ("gurmukhi",), "ps": ("arabic",), "sa": ("devanagari",),
+    "si": ("sinhala",), "ta": ("tamil",), "te": ("telugu",),
+    "th": ("thai",), "ti": ("ethiopic",), "ur": ("arabic",),
+    "yi": ("hebrew",), "zh": ("han",),
+    # 134 precomposed forms, and a hand-typed list that missed one would be a
+    # false positive on ordinary prose. The whole script is the honest rule.
+    "vi": ("latin",),
+}
+
+# CJK prose is written with its own punctuation, and a report flagging every
+# full stop is a report nobody reads. U+3000 IDEOGRAPHIC SPACE is deliberately
+# absent: it is invisible whitespace, which is the thing this tool exists to
+# find, and a Japanese ledger that wants it can say so.
+CJK_PUNCT = "、。〃〈〉《》「」『』【】〔〕〖〗〘〙〚〛〜〝〞〟・"
+
+# Blank-rendering characters that carry a script's name, and so would ride
+# into the exempt set on that script's prefix. They are letters by category
+# and nothing by appearance, which makes them the whole reason this tool
+# reports by exemption rather than by category - the README names the Hangul
+# fillers as the example. A script rule must not hand them back.
+#
+# These five are the complete set: every Unicode character that renders blank,
+# is category L or M, and matches one of the SCRIPTS prefixes. U+FFA0 is here
+# for company only, being named HALFWIDTH and so never matched anyway.
+NEVER_EXEMPT = frozenset("ᅟᅠㅤﾠ឴឵")
+
+# Nothing beyond the ASCII floor. `--no-lang` and `lang = "none"` reach this.
+NOTHING = (frozenset(), ())
+
+
+def env_locale():
+    """(value, variable) of the locale the environment asks for, or (None,
+    None) where it names no language.
+
+    POSIX precedence: LC_ALL beats LC_CTYPE beats LANG.
+
+    C and POSIX name no language, and are skipped rather than read as a
+    language we have no letters for. Skipped, not treated as an answer: this
+    is CPython's doing as often as the caller's. The interpreter coerces the C
+    locale at startup and puts LC_CTYPE=C.UTF-8 into its own environment (PEP
+    538), which it does whenever the locale named is not one the system has
+    generated. Stopping there would let a coerced LC_CTYPE outrank the LANG
+    the caller actually set, and a minimal container would quietly scan Czech
+    prose as though no language had been named at all.
+
+    So an explicit LC_ALL=C no longer forces the ASCII-only set. --no-lang and
+    lang = "none" say that, and say it without depending on which locales a
+    machine happens to have installed.
+    """
+    for name in ("LC_ALL", "LC_CTYPE", "LANG"):
+        value = os.environ.get(name)
+        if value and not names_no_language(value):
+            return value, name
+    return None, None
+
+
+def names_no_language(value):
+    """True for C and POSIX, which name a character set and no language."""
+    return locale_keys(value)[-1] in ("c", "posix")
+
+
+def locale_keys(locale):
+    """Lookup keys for a locale, most specific first.
+
+    cs_CZ.UTF-8 gives ("cs",); sr_RS@latin gives ("sr@latin", "sr"), since the
+    modifier is what says which of Serbian's two scripts is meant.
+
+    The modifier is taken off before the codeset, not after. glibc spells a
+    locale language[_territory][.codeset][@modifier], so splitting on "." first
+    would swallow "@latin" along with ".UTF-8" and quietly resolve
+    sr_RS.UTF-8@latin - the form `locale -a` prints - to Serbian Cyrillic.
+    """
+    text, _, modifier = locale.strip().partition("@")
+    code = text.split(".")[0].split("_")[0].lower()
+    if modifier:
+        return ("%s@%s" % (code, modifier.lower()), code)
+    return (code,)
+
+
+def spell_alphabet(letters):
+    """Both cases, lower half first, the way a recorded `exempt` reads.
+
+    This is the string the report tells people to edit, so it is deduplicated
+    and kept free of ASCII. Turkish would otherwise record `İ` twice and an
+    ASCII `I` besides, `ı`.upper() being the undotted capital's ASCII cousin,
+    and Catalan would record its middle dot twice.
+
+    `ß`.upper() is "SS", two characters and not a letter that could be exempted
+    on its own, so a multi-character result is dropped.
+    """
+    out = []
+    for ch in list(letters) + [ch.upper() for ch in letters]:
+        if len(ch) == 1 and ch not in out and not is_ascii_exempt(ch):
+            out.append(ch)
+    return "".join(out)
+
+
+def expand(letters):
+    """Every case variant of `letters`, as a set.
+
+    Case is expanded rather than taken literally so that a hand-written
+    `exempt = "áčď"` also covers `Á Č Ď`. Nobody means a letter in one case
+    only, and the recorded form carries both anyway.
+    """
+    out = set(letters)
+    for ch in letters:
+        for other in (ch.upper(), ch.lower()):
+            if len(other) == 1:
+                out.add(other)
+    return out
+
+
+def lang_exempt(name):
+    """(characters, script prefixes) for a language code or a script name, or
+    None when the tables have never heard of it."""
+    for key in locale_keys(name):
+        if key in ALPHABETS:
+            return expand(ALPHABETS[key]), ()
+        if key in SCRIPT_LANGS:
+            chars, prefixes = set(), []
+            for script in SCRIPT_LANGS[key]:
+                prefixes.extend(SCRIPTS[script])
+                if script in ("han", "kana"):
+                    chars.update(CJK_PUNCT)
+            return chars, tuple(prefixes)
+        # A script may also be named outright, which is how the fallback and
+        # `lang = "cyrillic"` in a ledger are spelled.
+        if key in SCRIPTS:
+            return set(), SCRIPTS[key]
+    return None
+
+
+def spec_exempt(letters, name):
+    """((characters, prefixes), unrecognised-name) from an `exempt` string and
+    a `lang` value, either of which may be empty."""
+    chars, prefixes, unknown = expand(letters), (), None
+    if name and names_no_language(name):
+        # C and POSIX name no language wherever they are written, --lang and a
+        # ledger included, and are the default rather than a complaint.
+        name = ""
+        if not letters:
+            prefixes = SCRIPTS["latin"]
+    if name and name.strip().lower() != "none":
+        got = lang_exempt(name)
+        if got is not None:
+            chars |= got[0]
+            prefixes = got[1]
+        else:
+            unknown = name
+            # A valid code the tables have never heard of falls back to the
+            # script charck exempted before it knew about languages at all.
+            # Not when an alphabet was spelled out too: that was deliberate,
+            # and widening it to the whole script would undo it.
+            if not letters:
+                prefixes = SCRIPTS["latin"]
+    return (frozenset(chars), prefixes), unknown
+
+
+def resolve_locale(lang, no_lang, table):
+    """Resolve the exempt set: (exempt, origin, record, unrecognised).
+
+    Command line, then the ledger, then the environment, then the Latin
+    script, which is what charck exempted before there was a locale at all.
+
+    `record` is the [locale] table to write down, and is set only when the
+    answer came from the environment: a ledger that says so already needs no
+    help, and a run is not reproducible while it depends on a variable.
+    """
+    if no_lang or (lang or "").strip().lower() == "none":
+        where = "--no-lang" if no_lang else "--lang none"
+        return NOTHING, where, None, None
+    if lang:
+        exempt, unknown = spec_exempt("", lang)
+        return exempt, "--lang %s" % lang, None, unknown
+    if table is not None:
+        exempt, unknown = spec_exempt(table["exempt"], table["lang"])
+        return exempt, str(table["path"]), None, unknown
+    value, var = env_locale()
+    if value:
+        exempt, unknown = spec_exempt("", value)
+        origin = "$%s=%s" % (var, value)
+        if unknown is not None:
+            # Nothing is recorded for a language we could not resolve. The
+            # next run should ask the environment again rather than inherit a
+            # guess this one had no basis for.
+            return exempt, origin, None, unknown
+        return exempt, origin, locale_record(value, var), None
+    return (frozenset(), SCRIPTS["latin"]), "default (latin script)", \
+        None, None
+
+
+def locale_record(locale, var):
+    """What to write into a [locale] table for an environment locale.
+
+    An alphabet is recorded as the letters themselves, so correcting it is one
+    edit to a visible string rather than an argument with a table compiled
+    into the tool. A script cannot be spelled out at all, and keeps its name.
+    """
+    for key in locale_keys(locale):
+        if key in ALPHABETS:
+            letters = spell_alphabet(ALPHABETS[key])
+            if not letters:
+                return {"key": "lang", "value": "none", "from": locale,
+                        "var": var, "note": "written in plain ASCII"}
+            return {"key": "exempt", "value": letters, "from": locale,
+                    "var": var, "note": "the letters this language uses"}
+        if key in SCRIPT_LANGS or key in SCRIPTS:
+            return {"key": "lang", "value": key, "from": locale, "var": var,
+                    "note": "too many characters to list, so the script"}
+    return None
+
+
+def is_exempt(ch, exempt):
+    """True for characters that are never reported: the ASCII floor, plus
+    whatever the resolved locale allows."""
+    if is_ascii_exempt(ch):
+        return True
+    chars, prefixes = exempt
+    if ch in chars:
+        # Spelled out by hand, and so meant. Only the script rule below is a
+        # guess, and only it is second-guessed.
+        return True
+    if not prefixes or ch in NEVER_EXEMPT:
+        return False
+    # Letters, the marks that go with them, and the script's own punctuation
+    # and digits. Arabic fathas and Devanagari vowel signs are Mn/Mc, and a
+    # script exempted without them flags every vowelled word; the danda ends
+    # every Hindi sentence and the Ethiopic full stop every Amharic one, so
+    # leaving N and P out flags ordinary prose into uselessness. Membership is
+    # still the character's own name, so this admits nothing for Latin, whose
+    # punctuation is named for neither.
+    if unicodedata.category(ch)[0] not in "LMNP":
+        return False
+    name = unicodedata.name(ch, "")
+    # Ligatures carry their script's name but are paste artifacts, so they
+    # stay reported - but only the ones that really are. Unicode draws the
+    # line itself, with a compatibility decomposition: `ﬁ` has one and is the
+    # PDF paste this rule was written for, and so does Armenian `և`, which a
+    # normaliser would expand. `œ` and the Yiddish `װ ױ ײ` have none. They are
+    # letters that happen to be named ligature, and matching on the name alone
+    # flagged every Yiddish text this tool was just taught to read.
+    # Fullwidth forms are named FULLWIDTH and never match here at all, which
+    # is the same promise for the same reason.
+    if "LIGATURE" in name and unicodedata.decomposition(ch).startswith("<"):
+        return False
+    return name.startswith(prefixes)
+
+
+# --------------------------------------------------------------------------
 # config
 # --------------------------------------------------------------------------
 
@@ -305,10 +710,10 @@ class ConfigError(Exception):
 
 
 def load_config(path, base=None):
-    """Return ({char: entry}, [ignore pattern]). Raises ConfigError on anything
-    malformed."""
+    """Return ({char: entry}, [ignore pattern], locale). Raises ConfigError on
+    anything malformed."""
     if not path.exists():
-        return {}, []
+        return {}, [], None
     try:
         with open(path, "rb") as fh:
             data = tomllib.load(fh)
@@ -325,6 +730,7 @@ def load_config(path, base=None):
                           "entries, not %s" % (path, type(chars).__name__))
 
     patterns = load_patterns(path, data.get("files"))
+    locale = load_locale(path, data.get("locale"))
     out = {}
     for key, entry in chars.items():
         if not KEY_RE.match(key):
@@ -370,18 +776,22 @@ def load_config(path, base=None):
                 % (path, key, collapse))
 
         ch = chr(cp)
-        # An exempt character is never reported, so acting on one would change
-        # bytes the report never showed. Refuse rather than corrupt silently.
-        if action in ("delete", "replace") and is_exempt(ch):
+        # Only the ASCII floor is refused. It is never reported, so acting on
+        # one would change bytes the report never showed. A character the
+        # locale exempts is a different matter: writing it down here brings it
+        # back into the report, so the decision can be seen before it applies.
+        # The floor cannot be checked any wider than this in any case, since
+        # the locale lives in the very file being loaded.
+        if action in ("delete", "replace") and is_ascii_exempt(ch):
             raise ConfigError(
-                "%s: [chars.%s] %s is exempt and never reported, so it cannot "
-                "be %sd" % (path, key, name_of(ch), action))
+                "%s: [chars.%s] %s is never reported, so it cannot be %sd"
+                % (path, key, name_of(ch), action))
         if ch in out:
             raise ConfigError(
                 "%s: [chars.%s] duplicates an earlier entry for the same "
                 "character" % (path, key))
         out[ch] = {"action": action, "to": to, "collapse": collapse}
-    return out, patterns
+    return out, patterns, locale
 
 
 def load_patterns(path, files):
@@ -410,6 +820,40 @@ def load_patterns(path, files):
             raise ConfigError("%s: [files] ignore holds %r, which is not a "
                               "quoted string" % (path, pattern))
     return patterns
+
+
+def load_locale(path, locale):
+    """Validate a [locale] table and return {"exempt", "lang"}, or None.
+
+    An unknown language code is not an error here: a valid code the tables
+    have no data for falls back to a script rule with a note, the same as one
+    read from the environment. Malformed is another matter, and refused.
+    """
+    if locale is None:
+        return None
+    if not isinstance(locale, dict):
+        raise ConfigError(
+            "%s: `locale` must be a table holding `exempt` and `lang`, not %s"
+            % (path, type(locale).__name__))
+    for key in locale:
+        if key not in ("exempt", "lang"):
+            raise ConfigError("%s: [locale] has no `%s` key; the keys are "
+                              "`exempt` and `lang`" % (path, key))
+    out = {}
+    for key in ("exempt", "lang"):
+        value = locale.get(key, "")
+        if not isinstance(value, str):
+            raise ConfigError("%s: [locale] %s = %r must be a quoted string"
+                              % (path, key, value))
+        out[key] = value
+    if not out["exempt"] and not out["lang"]:
+        # Silence here could mean "exempt nothing" or "fall through to the
+        # environment", and guessing wrong changes what the report says.
+        raise ConfigError(
+            '%s: [locale] is empty, so it decides nothing; use lang = "none" '
+            "to exempt nothing beyond ASCII, or remove the table to take the "
+            "language from the environment" % path)
+    return out
 
 
 def toml_string(text):
@@ -645,6 +1089,40 @@ def append_patterns(path, patterns):
         return fresh, []
 
 
+def render_locale(record):
+    return (
+        "[locale]\n"
+        "# from $%s=%s - %s.\n"
+        "# Edit freely: what is named here is never reported.\n"
+        "%s = %s\n"
+        % (record["var"], record["from"], record["note"],
+           record["key"], toml_string(record["value"])))
+
+
+def append_locale(path, record):
+    """Append a [locale] table, unless the ledger already has one.
+
+    Append-only, like the character entries and for the same reason: a table
+    that goes at the end needs no rewrite, so hand edits and comments survive.
+    Re-read under the lock, so of two concurrent first runs only one writes.
+    """
+    with open_ledger(path) as fh:
+        existing = read_ledger(fh, path)
+        if LOCALE_RE.search(existing):
+            return False
+        parts = []
+        if not existing:
+            parts.append(HEADER)
+        elif not existing.endswith("\n"):
+            # A hand-edited file may lack a final newline; appending straight
+            # on to that last line would produce invalid TOML.
+            parts.append("\n")
+        parts.append(render_locale(record))
+        fh.seek(0, os.SEEK_END)
+        fh.write("".join(parts).encode("utf-8"))
+        return True
+
+
 def append_entries(path, chars, counts):
     """Append undecided entries for `chars`. Never rewrites existing bytes, so
     hand edits, comments and ordering survive.
@@ -731,12 +1209,21 @@ def line_body(line):
     return line
 
 
-def scan_text(text):
-    """Yield (lineno, col, char, body) for every non-exempt character."""
+def scan_text(text, exempt, decided=frozenset()):
+    """Yield (lineno, col, char, body) for every character the locale does not
+    exempt.
+
+    `decided` holds the characters the ledger acts on, and they are reported
+    whatever the locale says: a decision that could never be seen could never
+    be applied either. It holds no undecided entry and no floor character, so
+    adding a letter to [locale] exempt silences it even after the tool has
+    asked about it, and printable ASCII stays unreportable however the ledger
+    is edited. `main` builds it.
+    """
     for lineno, line in iter_lines(text):
         body = line_body(line)
         for col, ch in enumerate(body, start=1):
-            if not is_exempt(ch):
+            if ch in decided or not is_exempt(ch, exempt):
                 yield lineno, col, ch, body
 
 
@@ -1340,6 +1827,19 @@ def collect(paths, exts, ign):
 # main
 # --------------------------------------------------------------------------
 
+def describe_exempt(exempt):
+    """The exempt set on one line: the letters where they were spelled out,
+    the script names where they could not be."""
+    chars, prefixes = exempt
+    parts = []
+    if chars:
+        parts.append("".join(sorted(chars, key=ord)))
+    if prefixes:
+        parts.extend(sorted(name for name, spelling in SCRIPTS.items()
+                            if set(spelling) <= set(prefixes)))
+    return " + ".join(parts) if parts else "nothing beyond ASCII"
+
+
 def describe(entry):
     if entry is None or entry["action"] == "":
         return "UNDECIDED"
@@ -1368,6 +1868,13 @@ def build_parser():
                          "(default: %s overridden per character by the "
                          "nearest %s at or above the working directory)"
                          % (global_config(), LOCAL_NAME))
+    ap.add_argument("--lang", metavar="LOCALE", default=None,
+                    help="exempt the letters this language writes with, "
+                         "instead of asking the environment; a locale, a "
+                         "language code, a script name, or \"none\"")
+    ap.add_argument("--no-lang", action="store_true",
+                    help="exempt nothing beyond printable ASCII, whatever "
+                         "the ledger and the environment say")
     ap.add_argument("--ext", metavar="LIST", default="",
                     help="restrict a directory walk by extension, "
                          "e.g. .md,.toml")
@@ -1397,7 +1904,23 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     layers, config_path = resolve_layers(args.config)
-    config, source, groups = merge_layers(layers)
+    config, source, groups, locale_table = merge_layers(layers)
+    exempt, origin, locale_new, unknown_lang = resolve_locale(
+        args.lang, args.no_lang, locale_table)
+    # A character the ledger acts on is reported whatever the locale says, so
+    # that --fix never changes bytes the report did not show.
+    #
+    # Only `delete` and `replace`, and this is load-bearing rather than
+    # tidiness. Undecided entries are written by the tool itself, for every
+    # character it has ever seen, so an entry carries no intent until an
+    # action is filled in. Letting an undecided one un-exempt would mean a
+    # letter, once asked about, could never be silenced by adding it to
+    # [locale] exempt - which is the correction the report tells you to make.
+    # Never a floor character either, though load_config already refuses to
+    # act on one.
+    decided = frozenset(ch for ch, entry in config.items()
+                        if entry["action"] in ("delete", "replace")
+                        and not is_ascii_exempt(ch))
 
     defaults = rule_group(DEFAULT_IGNORE, None, "built-in defaults", "default")
     # A --exclude anchors to the working directory, and goes last so it
@@ -1416,6 +1939,11 @@ def main(argv=None):
     if args.list:
         for path, base in layers:
             print("# %s" % path)
+        print("exempt: %s   [%s]" % (describe_exempt(exempt), origin))
+        if unknown_lang:
+            print("unknown language %s, falling back"
+                  % toml_string(unknown_lang))
+        print()
         if config:
             print("%-9s %-42s %-16s %s" % ("CODE", "NAME", "DECISION", "FROM"))
             for ch in sorted(config, key=ord):
@@ -1437,6 +1965,10 @@ def main(argv=None):
               "not listed here")
         return 0
 
+    if args.lang is not None and not args.lang.strip():
+        # Every other unusable value says so; the empty string would otherwise
+        # be the one that silently behaves as though the flag were absent.
+        ap.error("--lang needs a language; --no-lang exempts nothing")
     if not args.paths:
         ap.error("no PATH given")
     if args.fix and args.dry_run:
@@ -1514,7 +2046,7 @@ def main(argv=None):
                                       or path.resolve() in config_resolved)
         except OSError:
             is_self = not direct and path.name in SELF_FILES
-        got = list(scan_text(text))
+        got = list(scan_text(text, exempt, decided))
         if got:
             cache[path] = text
         for lineno, col, ch, body in got:
@@ -1525,9 +2057,18 @@ def main(argv=None):
     # ledger; the global one is never written to.
     unknown = [ch for ch in sorted(counts, key=ord) if ch not in config]
     appended, recorded, unrecorded = [], [], []
-    created_ledger = False
+    created_ledger = locale_written = False
+    # The locale rides along with a write that was happening anyway, and never
+    # causes one. A clean tree wrote nothing before this feature and must
+    # write nothing now: creating a ledger for a run with no findings is
+    # presumptuous, and on a read-only checkout it would turn a green build
+    # gate into exit 2.
     if (unknown or to_record) and not args.no_append:
         created_ledger = not config_path.exists()
+        if locale_new:
+            # First, so a ledger this run creates opens with the language it
+            # was read under rather than burying it under the findings.
+            locale_written = append_locale(config_path, locale_new)
         if to_record:
             # Before the characters, so a ledger this run creates opens with
             # the patterns instead of burying them under the first character
@@ -1642,6 +2183,15 @@ def main(argv=None):
                  ", ".join(key_of(c) for c in blocked)))
     if created_ledger:
         print("  created %s" % config_path)
+    if unknown_lang:
+        # Always shown, not just under -v: it says why the report looks the
+        # way it does, and the fallback is wider than the language asked for.
+        print("  no letters recorded for language %s; exempting %s instead"
+              % (toml_string(unknown_lang), describe_exempt(exempt)))
+    if locale_written:
+        print("  recorded [locale] %s = %s in %s"
+              % (locale_new["key"], toml_string(locale_new["value"]),
+                 config_path))
     if recorded:
         print("  recorded %s in %s"
               % (plural(len(recorded), "ignore pattern"), config_path))
@@ -1666,6 +2216,20 @@ def main(argv=None):
               % (n, "" if n == 1 else "s", "s" if n == 1 else "",
                  "re-run without --no-append to record them in"
                  if args.no_append else "edit", config_path))
+        # An alphabet is corrected by editing one string, not by deciding a
+        # foreign name's letters one table at a time. Only when the locale
+        # spelled its letters out: for a script there is nothing to extend.
+        letters = [ch for ch in undecided
+                   if unicodedata.category(ch)[0] == "L"]
+        if letters and exempt[0] and not exempt[1]:
+            one = len(letters) == 1
+            print("    %s %s; if this language uses %s, add %s to [locale] "
+                  "exempt rather than deciding %s"
+                  % (", ".join(key_of(c) for c in letters),
+                     "is a letter" if one else "are letters",
+                     "it" if one else "them",
+                     toml_string("".join(letters)),
+                     "it" if one else "each one"))
 
     nfiles = len({f[0] for f in findings})
     # An ignored directory counts once and its contents are never enumerated,

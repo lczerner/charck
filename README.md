@@ -24,11 +24,12 @@ decision, and it is recorded rather than guessed.
 
 ## What gets reported
 
-Everything outside printable ASCII, with a single exemption: Latin letters
-carrying diacritics. `á`, `š` and `ř` are letters you meant to type, and flagging
-them on every run would bury the signal. Ligatures such as `ﬁ` and fullwidth
-forms such as `Ａ` are still reported, because those are paste artifacts rather
-than letters.
+Everything outside printable ASCII, with a single exemption: the letters your
+language writes with. `á`, `š` and `ř` are letters a Czech writer meant to type,
+and flagging them on every run would bury the signal. Ligatures such as `ﬁ` and
+fullwidth forms such as `Ａ` are still reported, because those are paste artifacts
+rather than letters. Which letters are exempt is the subject of
+[Your language](#your-language) below.
 
 Note that a rule based on Unicode general category alone is not enough here, and
 this is worth spelling out, because it is where the naive version of this tool
@@ -43,6 +44,51 @@ goes wrong:
 So `charck` works the other way around. It reports everything that is not on the
 exemption list, which makes coverage a property of the design rather than of how
 many special cases we remembered.
+
+## Your language
+
+The exempt set comes from your locale. `cs_CZ.UTF-8` exempts the fifteen letters
+Czech uses and no others, so a Polish `ł` or a German `ß` in Czech prose is still
+a finding. A locale replaces the set rather than adding to it: under `ru_RU` the
+exempt letters are Cyrillic, and a stray `é` is reported like anything else.
+
+Languages an alphabet cannot describe get their whole script instead. Japanese is
+kana plus 97668 Han ideographs, which is not a list anyone can write down, so
+`ja_JP` exempts those scripts and the punctuation that goes with them. `U+3000
+IDEOGRAPHIC SPACE` is deliberately still reported: it is invisible whitespace,
+which is the thing this tool exists to find.
+
+Where the answer comes from, in order:
+
+| source | |
+| --- | --- |
+| `--lang LOCALE`, `--no-lang` | this run only |
+| `[locale]` in the ledger | a local table replaces the global one outright |
+| `$LC_ALL`, `$LC_CTYPE`, `$LANG` | recorded to the ledger on first use |
+| the Latin script | what `charck` exempted before it asked |
+
+A locale read from the environment is written into the ledger as the run goes, so
+later runs no longer depend on a variable. An alphabet is recorded as the letters
+themselves:
+
+```toml
+# .charck.toml
+[locale]
+exempt = "áčďéěíňóřšťúůýžÁČĎÉĚÍŇÓŘŠŤÚŮÝŽ"
+```
+
+That is also how you correct it. Real prose carries foreign names, and the first
+run over a tree will ask about the `ö` in Schrödinger. Add the letters you would
+rather not hear about again to that one string and the tool's own table stops
+mattering. `lang = "none"` exempts nothing beyond ASCII, and so does `--no-lang`.
+
+Two things outrank the locale. Printable ASCII, tab and newline are never
+reported whatever any of this says. And a character you have decided to `delete`
+or `replace` is always reported, so that `--fix` never changes bytes the report
+did not show. An undecided entry does not count: `charck` writes one for every
+character it has ever seen, so an entry means nothing until you fill in an
+action, and a letter you add to `exempt` goes quiet even though the ledger still
+carries the entry that first asked about it.
 
 ## Detection and policy are separate
 
@@ -226,6 +272,8 @@ not covered by a run over its parent. Name it and it is walked.
 --no-append        report only, and do not add entries to the ledger
 --list             print the merged ledger as a decision table
 --config PATH      use only this ledger, ignoring both layers
+--lang cs_CZ       exempt this language's letters, instead of asking $LANG
+--no-lang          exempt nothing beyond printable ASCII
 --ext .md,.toml    restrict a directory walk by extension
 --exclude build/   leave this out of a walk, and record it in the ledger
 --no-ignore        apply no ignore patterns at all, defaults included
